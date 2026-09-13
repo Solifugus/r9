@@ -671,10 +671,19 @@ Recorded 2026-09-13, against RV-9 as built (RV-9 `docs/design.md` §33).
 
 **The compiler should emit an execution bound for every `realtime` component.** RV-9 uses the declared bound in the analysis. Without one it uses the worst execution time measured so far, which is a floor and not a bound, so placement and refusal are only as trustworthy as that number.
 
+**The escape hatch is a constraint, not a number.** Decided 2026-09-13 and built (RV-9 `docs/design.md` §36). With two levels, an explicit `priority 10` would have nothing to map onto, so RV-9 offers a declared *placement* instead: manifest tag `placement` (0x0014), one of `derived` (the default), `urgent` or `routine`. A pinned component is never the one moved to make room. If its pin leaves any loop unable to meet its deadline, it is refused `UNSCHEDULABLE` like any other component, so the hatch cannot be used to defeat the analysis. `urgent` also answers the second question below: it is how a component says it must never run beneath the radio. A spelling in R9 might be:
+
+```text
+placement urgent     # never below the radio
+placement routine    # never ahead of it
+```
+
+The value names are published in the target profile under `placement`.
+
 **Open for this document:**
 
-- **The `priority` escape hatch** shown above is not implemented. With two levels it could only mean "always urgent" or "always routine". Is that still worth offering, or does it only let a program defeat the analysis?
-- **Routine components run below the radio**, and their bounds do not include it. Should the language be able to say "this component must never be placed below the radio", as a constraint rather than a number?
+- **The surface syntax** for placement, and whether `priority` stays as a word at all.
+- **Routine components run below the radio**, and their bounds do not include it. `placement urgent` keeps a component out of that position but does not bound the radio. Whether a routine bound should ever be trusted for a hard deadline is still a language decision.
 
 ---
 
