@@ -646,6 +646,21 @@ else
 end
 ```
 
+## 13.1 How RV-9 answers this
+
+Recorded 2026-09-13, against RV-9 as built (RV-9 `docs/design.md` §33).
+
+**Priority is derived, as asked.** No program chooses a number. At every admission RV-9 places the whole real-time workload using response-time analysis over each component's release interval (`every` or `minimum_interval`), `deadline` (default: the period), and worst-case execution bound. It moves components that are already running when a new one changes the placement, and it refuses a component with `UNSCHEDULABLE` when no placement lets every deadline be met. That refusal can happen even when the CPU is far from full: two components using under 4% each are refused if their sub-millisecond deadlines collide.
+
+**There are two levels, not a ranking.** On the current hardware exactly one host priority is above the radio, so RV-9 offers *urgent* (above everything) and *routine* (above all non-real-time work, below the radio). Placement starts everything urgent and moves the least urgent component down only while something urgent would otherwise miss its deadline. Deadline order is therefore respected where it matters, and a single component always runs at the top.
+
+**The compiler should emit an execution bound for every `realtime` component.** RV-9 uses the declared bound in the analysis. Without one it uses the worst execution time measured so far, which is a floor and not a bound, so placement and refusal are only as trustworthy as that number.
+
+**Open for this document:**
+
+- **The `priority` escape hatch** shown above is not implemented. With two levels it could only mean "always urgent" or "always routine". Is that still worth offering, or does it only let a program defeat the analysis?
+- **Routine components run below the radio**, and their bounds do not include it. Should the language be able to say "this component must never be placed below the radio", as a constraint rather than a number?
+
 ---
 
 # 14. Bounded Execution
