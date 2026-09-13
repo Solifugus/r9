@@ -843,10 +843,9 @@ Either is stopped from outside, and only at an instant when it is running its ow
 
 **For this document to decide:** `RUNAWAY` is not a row in the §15.3 table. It is RV-9's, the compiler emits nothing for it, and it is arguably a case of `DEADLINE`. It is distinct so that "late" and "stopped responding" stay separate facts. Whether R9 names it, folds it into `DEADLINE`, or treats it as an operating-system fact outside the language is open.
 
-**Still open on the RV-9 side**, and relevant here:
+**The fault is published in the component's own cell** (RV-9 `docs/design.md` §31), which is what `watch MOTOR_CONTROL.faulted` reads. The cell keeps the last value and stamp the component published, and carries the reason beside them; the publication sequence advances by one, so a watcher blocked on the cell wakes. Opening the cell to publish again clears it, which is how a restarted component becomes healthy without new vocabulary. `COMPONENT_FAILED` (§15.5) now has something to test: an `await` on a cell whose writer has faulted can see so immediately rather than waiting out its `within`.
 
-- The fault is published in the process table, not in the component's publication cell, so `watch MOTOR_CONTROL.faulted` has nowhere to read it from yet. The natural answer is for the cell a faulted component was writing to carry the fault.
-- `COMPONENT_FAILED` (§15.5's second open item) needs that same thing: an await on a cell whose writer has faulted must be able to see so.
+**Publications are declared** rather than agreed by convention: `publishes` reserves a cell for a component at admission, so a second component publishing the same thing is refused before it starts, and `watches` is refused when nothing on the machine could ever publish that name. A compiler should emit both from `expose` and from `watch`.
 
 ---
 
