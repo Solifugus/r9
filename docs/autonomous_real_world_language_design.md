@@ -121,6 +121,21 @@ The co-design contract flows in three directions:
 2. **Resource contract: R9 to RV-9.** The compiler emits modules with mandatory and advisory requirements, together with the strongest static evidence it can establish.
 3. **Measured reality: RV-9 to R9.** At runtime RV-9 exposes admission results, timing measurements, resource use, and faults as ordinary observable state.
 
+**As built, 2026-09-13:** the first of these now exists, in two halves (RV-9 `docs/design.md` §34).
+
+- **`docs/target/rv9-profile.json`** is generated from RV-9's sources and checked for staleness by its tests. It covers:
+  - the module format and ABI;
+  - every manifest tag, with its number, encoding, repetition, value names, and whether anything enforces it;
+  - execution classes;
+  - every fault code with its R9 reason;
+  - process and I/O error codes;
+  - every call in the module environment, with the ABI version that added it and whether it is real-time safe (`yes`, `device`, `no`);
+  - which file managers and drivers are real-time safe;
+  - real-time and process limits.
+- **The `profile` command** prints what one particular board offers: its devices, their file managers and drivers, and its real-time priorities relative to the radio.
+
+Five registered manifest tags have no consumer in RV-9 yet: `static`, `class`, `capability`, `compiler` and `runtime`. The profile marks them unenforced, so a compiler should not treat emitting them as a guarantee.
+
 This closed loop lets the compiler reject known-invalid programs before deployment while allowing RV-9 to recheck claims against the actual machine and report when measured behavior disagrees.
 
 The intended initial deployment model is a compiler-generated bundle:
@@ -805,6 +820,7 @@ The intent the programmer expresses is identical in both places: *I have detecte
 | --- | --- | --- |
 | `fault NAME` | the program | `NAME` |
 | deadline missed | RV-9 | `DEADLINE` |
+| stopped responding — never returned to wait | RV-9 | `DEADLINE` |
 | stack exhausted | RV-9 | `STACK` |
 | physical quantity overflow (§7) | R9 runtime | `OVERFLOW` |
 | device failure | RV-9 | `DEVICE` |
@@ -856,7 +872,9 @@ Recorded 2026-09-13, against RV-9 as built (RV-9 `docs/design.md` §29).
 
 Either is stopped from outside, and only at an instant when it is running its own compiled code. Generated code reaches the system only through calls that return, so at such an instant it holds nothing. The failsafe and the published reason then follow in §15.1's order.
 
-**For this document to decide:** `RUNAWAY` is not a row in the §15.3 table. It is RV-9's, the compiler emits nothing for it, and it is arguably a case of `DEADLINE`. It is distinct so that "late" and "stopped responding" stay separate facts. Whether R9 names it, folds it into `DEADLINE`, or treats it as an operating-system fact outside the language is open.
+**Decided 2026-09-13: a runaway is a `DEADLINE`.** A component that stops coming back to wait has missed every deadline since it stopped, and a program can do nothing different about "stopped responding" than about "late": in both cases the component has stopped, its failsafe has been applied, and its outputs are not to be trusted. The language therefore has no separate word for it. §15.3's table has a row mapping it to `DEADLINE`, and a publication cell reports `DEADLINE`. RV-9 keeps the name `RUNAWAY` in its process table and log, because how a component failed matters to whoever is debugging it, even though it does not matter to the program reacting to it.
+
+The mapping holds only if every `realtime` component has a deadline. A component released by `on` with no `minimum_interval` has none, so "late" is undefined for it. So **every `realtime` component must declare a release bound**: `every`, or `on` together with `minimum_interval`. A compiler should reject one that declares neither. RV-9 already cannot analyse such a component for admission (§13.1), so this closes a gap on both sides.
 
 **The fault is published in the component's own cell** (RV-9 `docs/design.md` §31), which is what `watch MOTOR_CONTROL.faulted` reads. The cell keeps the last value and stamp the component published, and carries the reason beside them; the publication sequence advances by one, so a watcher blocked on the cell wakes. Opening the cell to publish again clears it, which is how a restarted component becomes healthy without new vocabulary. `COMPONENT_FAILED` (§15.5) now has something to test: an `await` on a cell whose writer has faulted can see so immediately rather than waiting out its `within`.
 
