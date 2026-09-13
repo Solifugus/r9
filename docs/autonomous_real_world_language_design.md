@@ -134,7 +134,7 @@ The co-design contract flows in three directions:
   - real-time and process limits.
 - **The `profile` command** prints what one particular board offers: its devices, their file managers and drivers, and its real-time priorities relative to the radio.
 
-Five registered manifest tags have no consumer in RV-9 yet: `static`, `class`, `capability`, `compiler` and `runtime`. The profile marks them unenforced, so a compiler should not treat emitting them as a guarantee.
+Six registered manifest tags have no consumer in RV-9's firmware yet: `desc`, `static`, `class`, `capability`, `compiler` and `runtime`. `desc` is read only by a host-side tool. The profile marks all six unenforced, so a compiler should not treat emitting them as a guarantee.
 
 This closed loop lets the compiler reject known-invalid programs before deployment while allowing RV-9 to recheck claims against the actual machine and report when measured behavior disagrees.
 
