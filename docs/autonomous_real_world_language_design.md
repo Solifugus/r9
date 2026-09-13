@@ -837,9 +837,14 @@ Recorded 2026-09-13, against RV-9 as built (RV-9 `docs/design.md` §29).
 
 **Stopping from outside** exists as `signal` (a request, `RV9_SIG_STOP` — what `on stop` would hang off) and `kill` (not a request). `kill` is not a fault in this document's sense — it is an operator's act — but it applies failsafes like every other exit, and records `killed` rather than a reason name.
 
+**A body that never reaches its wait** is handled too (RV-9 `docs/design.md` §30). A watchdog flags a component still inside an activation after its deadline has passed, when a miss is fatal, and records `DEADLINE`. A component that holds the CPU for 250 ms without waiting is flagged whatever its policy, and records `RUNAWAY`.
+
+Either is stopped from outside, and only at an instant when it is running its own compiled code. Generated code reaches the system only through calls that return, so at such an instant it holds nothing. The failsafe and the published reason then follow in §15.1's order.
+
+**For this document to decide:** `RUNAWAY` is not a row in the §15.3 table. It is RV-9's, the compiler emits nothing for it, and it is arguably a case of `DEADLINE`. It is distinct so that "late" and "stopped responding" stay separate facts. Whether R9 names it, folds it into `DEADLINE`, or treats it as an operating-system fact outside the language is open.
+
 **Still open on the RV-9 side**, and relevant here:
 
-- A `realtime` body that never reaches its wait is not detected. Enforcing WCET as a budget with a timer is the missing piece, and until it exists, a component that spins is not faulted.
 - The fault is published in the process table, not in the component's publication cell, so `watch MOTOR_CONTROL.faulted` has nowhere to read it from yet. The natural answer is for the cell a faulted component was writing to carry the fault.
 - `COMPONENT_FAILED` (§15.5's second open item) needs that same thing: an await on a cell whose writer has faulted must be able to see so.
 
