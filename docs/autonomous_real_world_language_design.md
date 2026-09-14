@@ -3,8 +3,15 @@
 ## Language Design for Autonomous Real-World Systems
 
 **Status:** Draft design capture  
-**Scope:** Real-time and reactive layers are conceptually stable; their RV-9 ABI and execution details remain open.  
-**Open area:** Autonomy remains intentionally incomplete and requires further design.
+**Scope:** REALTIME is relatively mature. REACTION is becoming well defined; parameterized states, transition requirements, arbitration and preemption, and publication silence still need refinement.  
+**Open area:** PROACTION is deliberately unsettled, and is described by requirements, boundaries and research directions rather than grammar.
+
+**Markers.** Where the distinction matters, text is marked:
+
+- **Settled**: an architectural decision, changed only deliberately;
+- **Provisional**: syntax or semantics used in examples, still subject to refinement;
+- **Implementation question**: the meaning is settled, but how R9 or RV-9 realizes it is not;
+- **Open research**: the problem is recognized, and no answer is proposed.
 
 ---
 
@@ -28,7 +35,7 @@ The language should:
 - make physical dimensions and timing first-class enough to prevent mistakes;
 - make deterministic physical behavior easy to express;
 - keep intelligence and uncertain reasoning above deterministic execution;
-- provide a natural path from low-level real-time control to reactive behavior and eventually autonomy;
+- provide a natural path from low-level REALTIME control through REACTION to PROACTION, including autonomous behavior on the system itself;
 - avoid unnecessary constructs when existing ones can express the same idea.
 
 A recurring design principle is:
@@ -41,50 +48,48 @@ Reasonable behavior should come from the shortest form. Additional syntax should
 
 # 2. Architectural Model
 
-The system currently has two well-defined execution layers and one unfinished higher layer:
+The system has three layers:
 
 ```text
-    CONATUS / AUTONOMY
-     goals / deliberation
-     learning / reasoning
-             |
-             v
-      R9 AUTONOMY INTERFACE
-             |
-             v
-         R9 REACTIVE
-   watch / state / transition
-             |
-             v
-         R9 REAL-TIME
- timing / device use / expose
-             |
-             v
-             RV-9
- admission / scheduling / devices
- enforcement / timing telemetry
-             |
-             v
-       PHYSICAL WORLD
+            PROACTION
+    objectives / deliberation
+   memory / knowledge / learning
+               |
+   requests states; observes results
+               v
+            REACTION
+    watch / state / transition
+               |
+               v
+            REALTIME
+   timing / device use / expose
+               |
+               v
+              RV-9
+  admission / scheduling / devices
+  enforcement / timing telemetry
+               |
+               v
+         PHYSICAL WORLD
 ```
 
-The current working interpretation is:
+**Settled.** The formal names of the layers are **REALTIME**, **REACTION** and **PROACTION**. They correspond to the RV-9 execution classes of the same names, carried in the manifest's `class` tag. RV-9 does not yet act on that tag, and it schedules REACTION and PROACTION work as ordinary processes. The words *real-time*, *reactive* and *autonomous* are still used descriptively.
 
-### Real-Time
+### REALTIME
 
-> Execute physical operations with deterministic timing and publish coherent reality.
+> Perform physical operations correctly and on time, and publish coherent reality.
 
-### Reactive
+### REACTION
 
-> Observe reality and deterministically transform it toward requested states.
+> Given observed conditions, deterministically respond and reach known states.
 
-### Autonomy
+### PROACTION
 
-Provisional:
+> Decide what should happen next, including acting on its own initiative.
 
-> Decide which states or outcomes should be pursued, especially when deterministic machinery cannot decide what to do next.
+These statements are conceptual, not syntax. REALTIME is relatively mature. REACTION is becoming well defined. PROACTION is under active design (§34).
 
-The autonomy layer may ultimately be provided by **Conatus**, rather than becoming a large independent language subsystem.
+**Settled:** authority runs downward, from REALTIME constraints and safety to REACTION to PROACTION (§31). PROACTION is part of the system itself, not merely an interface to an outside intelligence, though it may use outside services (§34).
 
 ## 2.1 Relationship with RV-9
 
@@ -144,10 +149,11 @@ The intended initial deployment model is a compiler-generated bundle:
 | --- | --- |
 | R9 program | A related bundle of RV-9 modules and metadata |
 | Real-time component | An independently admitted and schedulable real-time program |
-| Reactive layer | An ordinary bounded supervisor program |
+| REACTION layer | An ordinary bounded supervisor program |
 | Published values and inputs | Fixed-size publication cells and mailboxes supplied by the R9 runtime contract |
 | States and transitions | Compiler-generated tables used by the reactive planner |
 | Failsafe declaration | Mandatory data interpreted by RV-9 or a trusted supervisor, not cleanup code in the failing process |
+| PROACTION | Not yet decided (§34) |
 
 The exact bundle and publication ABI remain to be finalized. The architectural boundary does not: RV-9 should provide general enforcement mechanisms, not implement R9 keywords or autonomous planning, while R9 should use RV-9's native module, process, device, timing, and resource-contract mechanisms rather than recreate an operating system inside its runtime.
 
@@ -232,7 +238,7 @@ record
 type[n]   // fixed-size arrays
 ```
 
-Large dynamic runtime structures are not required for the real-time layer.
+Large dynamic runtime structures are not required for the REALTIME layer. PROACTION will need them (§34.3); this section describes what REALTIME and REACTION rely on.
 
 Hard real-time code should avoid constructs that require unpredictable allocation or execution time.
 
@@ -502,7 +508,7 @@ end
 Reactive example:
 
 ```text
-await MOTOR_CONTROL.speed == 0m/s within 5s
+await abs(MOTOR_CONTROL.speed) < 0.01m/s within 5s
 else
     transition EMERGENCY_STOP
 end
@@ -518,7 +524,7 @@ Hard real-time contexts may place stronger restrictions on indefinite waiting.
 
 ---
 
-# 11. REAL-TIME LAYER
+# 11. REALTIME LAYER
 
 ## 11.1 Real-Time Components
 
@@ -585,10 +591,10 @@ on
 minimum_interval
 deadline
 within
-priority
+placement
 ```
 
-`priority` should generally be optional.
+`placement` is optional, and most components should not use it (§13.1).
 
 Potential advanced concepts such as `budget` and `phase` may be added later only if justified.
 
@@ -638,17 +644,19 @@ If omitted, a sensible default may be:
 deadline = period
 ```
 
-### `priority`
+### `placement`
 
-Most programmers should not need to manually assign priority.
+Most programmers should not need to think about scheduling order.
 
-RV-9 should derive scheduling priority or deadline order from the complete admitted workload and its periods, deadlines, minimum intervals, and execution bounds. A faster period alone is not always enough to choose correctly.
+RV-9 derives scheduling priority from the complete admitted workload and its periods, deadlines, minimum intervals, and execution bounds. A faster period alone is not always enough to choose correctly.
 
-Explicit priority remains an escape hatch:
+An explicit declaration remains as an escape hatch. It is a constraint on RV-9's placement rather than a number (§13.1):
 
 ```text
-priority 10
+placement urgent
 ```
+
+Earlier drafts spelled this `priority 10`. `priority` is no longer a word in R9.
 
 ### `within`
 
@@ -682,7 +690,7 @@ The value names are published in the target profile under `placement`.
 
 **Open for this document:**
 
-- **The surface syntax** for placement, and whether `priority` stays as a word at all.
+- **The surface syntax** for placement is provisional. Whether `priority` stays as a word is settled: it does not (§13).
 - **Routine components run below the radio**, and their bounds do not include it. `placement urgent` keeps a component out of that position but does not bound the radio. Whether a routine bound should ever be trusted for a hard deadline is still a language decision.
 
 ---
@@ -803,7 +811,7 @@ The same statement means the same thing in a transition body:
 ```text
 transition MOVING -> STOPPED
     MOTOR_CONTROL.target_speed = 0m/s
-    await MOTOR_CONTROL.speed == 0m/s within 5s
+    await abs(MOTOR_CONTROL.speed) < 0.01m/s within 5s
     else
         fault STOP_TIMEOUT
     end
@@ -817,7 +825,7 @@ attempt.status = FAILED
 attempt.reason = STOP_TIMEOUT
 ```
 
-Step 1 is empty because a transition owns no devices; steps 2 and 3 are §29's existing semantics. Nothing new is introduced — the keyword names an outcome the reactive layer already had.
+Step 1 is empty because a transition owns no devices; steps 2 and 3 are §29's existing semantics. Nothing new is introduced — the keyword names an outcome the REACTION layer already had.
 
 The intent the programmer expresses is identical in both places: *I have detected that I cannot continue correctly; do the defined thing.* Only the consequence differs, and the compiler knows the context.
 
@@ -1058,7 +1066,7 @@ One writer per cell is enforced; readers are unlimited. Cells are preallocated a
 
 **Inputs (§19) need nothing further.** They are this same object with the ownership reversed: the supervisor is the single writer and the real-time component the observer.
 
-**Still open on the RV-9 side.** A cell is created by whoever first opens it for writing, so two components agreeing on a name do so by convention. Declaring published cells in the module manifest — the way required devices already are — would let admission refuse a watcher naming a component that will never publish, and is the natural next step.
+**Declared, since.** This section first noted that a cell was created by whoever first opened it for writing, so two components agreed on a name only by convention, and that declaring cells in the module manifest was the natural next step. RV-9 has since taken that step (§15.6). `publishes` reserves a cell at admission, so a second publisher is refused before it starts. `watches` is refused when nothing on the machine could ever publish the name. A compiler emits `publishes` from `expose` and `watches` from `watch`.
 
 ---
 
@@ -1089,11 +1097,15 @@ but cannot directly assign to private or published output state.
 
 Exact input syntax remains an implementation detail, but the boundary is important.
 
+**Provisional:** an input may declare the value a component uses until the input is first written, as in `input enabled = false`. A component is then never left acting on an input nobody has set. Before that first write, the input's cell has never been published (§18.1).
+
+Inputs are written by REACTION. PROACTION does not write them, even when it runs on the same machine (§31.1).
+
 ---
 
-# 20. REACTIVE LAYER
+# 20. REACTION LAYER
 
-The reactive layer deliberately introduces very little new vocabulary.
+The REACTION layer deliberately introduces very little new vocabulary.
 
 Its nucleus is:
 
@@ -1115,6 +1127,8 @@ while
 await
 within
 ```
+
+Transitions take one refining word, `require` (§25.1), and `watch` can also handle silence (§21.1).
 
 There is currently **no separate reactive event subsystem**. Hardware events may still act as release sources for real-time components.
 
@@ -1175,6 +1189,35 @@ This enables efficient behavior:
 
 This matches the design principle of doing more with less.
 
+## 21.1 Silence
+
+**Required; syntax provisional.**
+
+`watch` reacts to publication. A physical system must also notice when an expected publication *stops*: a sensor is disconnected, a process stops publishing without faulting, or a link goes quiet. A publication that never arrives changes nothing, so a plain `watch` never runs.
+
+A promising form reuses `within ... else` from `await` (§10):
+
+```text
+watch IMU.orientation within 50ms
+    process_orientation()
+else
+    transition SAFE
+end
+```
+
+The body reacts to publication or change, as before. The `else` path handles a failure to publish within the required interval.
+
+Silence is handled this way without an event subsystem (§22). Absence becomes a branch of the construct that already observes the value.
+
+**Still to be refined:**
+
+- with several watched references, whether the interval applies to each of them or to any publication among them;
+- whether `else` runs once per silence, or again for each interval the silence lasts, and what happens when publication resumes;
+- when the first interval starts, if nothing has been published yet;
+- whether the interval is measured against publication time or against the observation time a cell carries (§18.1);
+- how silence relates to a faulted publisher, whose cell already reports the fault at once (§15.6). Silence should not be the only way a known fault is noticed.
+- **Implementation question:** for this to cost nothing while a value is healthy, RV-9's blocking wait on a cell's sequence needs a timeout.
+
 ---
 
 # 22. No Separate Reactive Event Block
@@ -1202,8 +1245,8 @@ Example:
 ```text
 state SAFE
 
-    MOTOR_CONTROL.speed == 0m/s
-    MOTOR_CONTROL.power == 0%
+    abs(MOTOR_CONTROL.speed) < 0.01m/s
+    abs(MOTOR_CONTROL.power) < 0.5%
     BRAKE.engaged == true
 
 end
@@ -1227,6 +1270,83 @@ state IDLE
 end
 ```
 
+## 23.1 Tolerance
+
+**Required; form provisional.**
+
+Measured physical values are never exactly anything. A cart at rest reports speeds a hair either side of zero, so:
+
+```text
+MOTOR_CONTROL.speed == 0m/s
+```
+
+is almost never true, and a state defined by it is almost never reached.
+
+**Provisional rule:** the compiler rejects exact `==` and `!=` on physical quantities with a continuous representation when they appear in state predicates, `require` conditions and `await` conditions. It warns about them elsewhere. Integers, enums and booleans compare exactly, as usual.
+
+Until a dedicated form is chosen, a tolerance is written as an ordinary bound, and named where it carries meaning:
+
+```text
+const STILL = 0.01m/s
+
+state STOPPED
+    abs(MOTOR_CONTROL.speed) < STILL
+end
+```
+
+The compiler checks a tolerance's dimension like any other quantity. A dedicated spelling might prove clearer, whether a `near(value, target, tolerance)` function or a tolerance attached to the comparison itself. That choice is open.
+
+This matters more in R9 than in most languages. Planning, preemption and recovery all reevaluate the actual physical state (§31.3), so a predicate that can never quite be satisfied would break all three.
+
+**Open:**
+
+- **Hysteresis.** A noisy value sitting near a boundary makes a predicate flicker, which fires watches repeatedly and makes a goal alternate between reached and not reached. It is not decided whether states need hysteresis or a dwell time, or whether a program expresses this with two thresholds, as §40 does.
+- **Tolerance against the sensor.** A tolerance finer than a sensor's resolution or noise can never be relied on. The compiler could check this only with device metadata it does not yet have (§42).
+
+## 23.2 Parameterized States
+
+**Provisional.**
+
+A state may take parameters, and then describes a family of physical conditions rather than one:
+
+```text
+state AT(target: position)
+    distance(NAV.position, target) < 0.2m
+end
+```
+
+One declaration replaces `AT_DOCK1`, `AT_DOCK2` and so on. A request supplies the arguments:
+
+```text
+transition AT(DOCK_1)
+```
+
+A transition definition names the parameter it is written for:
+
+```text
+transition STOPPED -> AT(target)
+    ...
+end
+```
+
+Inside that body, `target` is the requested value. The parameters belong to the declarative target state.
+
+**Settled: the graph stays static.** Parameters are values, not new states. The compiler knows every state declaration and every transition definition, and a request binds arguments without adding anything to the graph. Planning searches the same finite graph whatever the arguments are. Parameterization never implies modifying the transition graph at runtime.
+
+For now, parameters belong to the state being requested:
+
+- a parameterized state appears as the *target* of a transition definition, and its parameters are bound by the request;
+- it does not appear as a *source*. A system already at some position is recognized by the unparameterized states it also satisfies. In §40, a cart at one position is also `STOPPED`.
+
+It is open whether parameterized sources or intermediate parameterized states are needed, such as a path through `WAYPOINT(p)`, and how the planner would bind them.
+
+**Arguments are checked.** A parameter's dimension and shape are known at compile time. They may be declared, as with `target: position` above, or inferred from use (§6), as in §40. Which of these is required is provisional.
+
+- An argument of the wrong dimension is rejected before planning: at compile time when the request is R9 source, and on arrival when the request comes from outside.
+- Limits on the *value* of an argument are requirements (§25.1), so a request outside them fails with a reason that names the limit.
+
+`position` and `distance` here stand for a vector-of-length type (§5) and a library function. How such types are named is not yet specified.
+
 ---
 
 # 24. State Semantics
@@ -1241,7 +1361,7 @@ Thus:
 
 ```text
 state PARKED
-    MOTOR_CONTROL.speed == 0m/s
+    abs(MOTOR_CONTROL.speed) < 0.01m/s
     BRAKE.engaged
 end
 ```
@@ -1263,7 +1383,7 @@ transition MOVING -> STOPPED
 
     MOTOR_CONTROL.target_speed = 0m/s
 
-    await MOTOR_CONTROL.speed == 0m/s within 5s
+    await abs(MOTOR_CONTROL.speed) < 0.01m/s within 5s
     else
         fault STOP_TIMEOUT
     end
@@ -1276,7 +1396,7 @@ Another:
 ```text
 transition STOPPED -> PARKED
 
-    BRAKE.engaged = true
+    BRAKE.engage = true
 
 end
 ```
@@ -1308,6 +1428,45 @@ PARKED
  SAFE
 ```
 
+## 25.1 Requirements: `require`
+
+**Settled: requirements decide eligibility. Where they may appear, and their exact semantics, are provisional.**
+
+A transition may state conditions without which it is not allowed at all:
+
+```text
+transition STOPPED -> AT(target)
+
+    require BATTERY.charge > 20%
+
+    NAV.goal = target
+
+    await NAV.arrived within 10min
+    else
+        fault NAV_TIMEOUT
+    end
+
+end
+```
+
+A transition whose `require` condition is false is not currently an eligible edge for the transition planner. The planner does not try it and give up. For the purpose of that plan, the edge does not exist.
+
+`require` and `if` mean different things, and both are needed:
+
+- `if` is ordinary runtime branching inside a body that has already been chosen;
+- `require` decides whether the body can be chosen at all.
+
+A requirement also differs from a source state. `STOPPED` says what the world must be like for the body to make sense. `require` adds conditions that belong to no state, such as permission, resources, or the limits on an argument, without multiplying states to express them.
+
+**Provisional rules:**
+
+- `require` lines come first in a body, before any statement with an effect, because they are evaluated when planning rather than when execution reaches them.
+- A requirement may refer to published values, constants and the transition's parameters. It may not refer to a body's local variables.
+- A plan evaluates the requirements of all its steps against the values observed when the plan is made. Those values can change while earlier steps run, so each transition's requirements are checked again when it is reached. If one is false then, the attempt fails with `PRECONDITION_FAILED`. It is open whether the attempt should instead replan from observed reality.
+- The compiler knows each requirement's dependencies, and emits `watches` for them like any other observation (§15.6).
+
+**Diagnosis.** Because requirements are kept separate from the graph, a failure can say which requirement mattered. Suppose a path exists in the graph, but every such path is blocked by some requirement. The attempt then fails with `PRECONDITION_FAILED` rather than `NO_PATH`, and it carries the blocking requirements (§29).
+
 ---
 
 # 26. Transition Requests
@@ -1337,6 +1496,8 @@ MOVING -> STOPPED -> PARKED -> SAFE
 ```
 
 and execute those transformations.
+
+A request for a parameterized state supplies its arguments, as in `transition AT(DOCK_1)` (§23.2). Who made a request matters when two requests conflict (§31.2).
 
 ---
 
@@ -1437,17 +1598,22 @@ SUCCEEDED
 FAILED
 ```
 
-Possible failure reasons:
+Failure reasons:
 
-```text
-NO_PATH
-TIMEOUT
-PRECONDITION_FAILED
-COMPONENT_FAILED
-CONSTRAINT_VIOLATION
-```
+| reason | meaning |
+| --- | --- |
+| `NO_PATH` | no sequence of transition definitions leads from the observed state to the requested one, whatever their requirements |
+| `PRECONDITION_FAILED` | paths exist, but a `require` blocks every one of them; or a requirement was false when its transition was reached (§25.1) |
+| `TIMEOUT` | reserved for an attempt that exceeds a bound it was given; a body that names its own fault reports that name instead (§15.2) |
+| `COMPONENT_FAILED` | a component the attempt depends on has faulted (§15.5, §15.6) |
+| `CONSTRAINT_VIOLATION` | reserved; the constraint mechanism it would report is not yet designed |
+| `PREEMPTED` | the attempt was superseded by higher-authority behavior (§31.2) |
+
+A programmed `fault NAME` in a transition body reports `NAME` (§15.2).
 
 These may simply be enums.
+
+**A reason is not always enough.** `PRECONDITION_FAILED` is most useful when it says *which* requirement blocked the way. Likewise, `COMPONENT_FAILED` should say which component failed, and a programmed fault should say which transition raised it. An attempt should carry that detail beside its reason, for example the blocking requirements identified by name or source location. How that detail is represented is not decided.
 
 The important part is that transition outcome is **ordinary observable state**.
 
@@ -1525,25 +1691,25 @@ Thus:
 
 ---
 
-# 31. Reactive Planning vs Autonomy
+# 31. REACTION Planning, PROACTION, and Authority
 
-A key architectural boundary has emerged.
+Two different questions meet at this boundary.
 
-### Reactive transition planning asks:
+### REACTION transition planning asks:
 
-> Given a requested state, can I reach it using known legal transformations?
+> Given a requested state, can I reach it now, using known legal transformations?
 
-### Autonomy asks:
+### PROACTION asks:
 
-> Which state should I pursue, and why?
+> Which state should be pursued next, and why?
 
 Example:
 
 ```text
-let attempt = transition CHARGING_STATION
+let attempt = transition AT(CHARGER_A)
 ```
 
-If it succeeds, the reactive system has completed the deterministic task.
+If it succeeds, REACTION has completed a deterministic task.
 
 If it returns:
 
@@ -1552,25 +1718,86 @@ FAILED
 reason = NO_PATH
 ```
 
-the reactive layer has done its job.
+REACTION has done its job.
 
-The autonomy layer may then:
+PROACTION may then:
 
 - choose another charger;
-- change goals;
+- change objectives;
 - gather information;
 - wait;
 - ask for assistance;
 - create a new plan;
 - abandon the original objective.
 
-This keeps deterministic machinery deterministic.
+This keeps deterministic machinery deterministic, and keeps the decision about what to pursue where it belongs.
+
+## 31.1 Authority
+
+**Settled.**
+
+```text
+REALTIME constraints and safety
+    >
+REACTION
+    >
+PROACTION
+```
+
+- **REALTIME** holds what nothing above it may override: timing contracts, `limit`, and failsafes applied by RV-9 below a failed component (§15). REACTION reaches a component only through its declared inputs (§19), and the component's own limits still apply to whatever it is sent.
+- **REACTION** owns the inputs and the transition graph, including each transition's requirements (§25.1). It decides whether and how a requested state can be reached.
+- **PROACTION** decides what should happen and asks for it. It requests states, and observes published values and attempt results. It does not write component inputs or drive actuators directly. This holds when PROACTION runs on the same machine, not only when something outside is involved.
+
+RV-9 can enforce much of this with mechanisms it already has. A cell has exactly one writer (§18.1), so a PROACTION process cannot write an input cell that REACTION owns. Exclusive device ownership (§16.1) means it cannot take an actuator a component holds. Whether PROACTION may own devices of its own, such as a camera, a radio or storage, is open. For sensing, communication and memory it almost certainly must.
+
+## 31.2 Arbitration
+
+**Settled:** the ordering above, and these consequences of it.
+
+- A REACTION request supersedes a running attempt that PROACTION started. The superseded attempt ends `FAILED` with reason `PREEMPTED`, at its next safe preemption point (§31.3).
+- A PROACTION request made while a REACTION attempt is running fails with `PREEMPTED`, without being planned.
+- A REACTION response that must *continue* to hold is expressed with `require`, not with a lock. Suppose REACTION has reached `SAFE` because the battery is critical. PROACTION may then ask for something else. But while every transition out of `SAFE` requires enough charge, no eligible edge exists, so the request fails with `PRECONDITION_FAILED` and names the requirement (§29). PROACTION cannot override the safety response, and it learns exactly why.
+
+**Provisional:**
+
+- Until parallel transition execution is designed (§42), one attempt runs at a time.
+- A request for the state an attempt is already pursuing, with the same arguments and from the same authority, does not supersede that attempt; it refers to it. Without this rule, a `watch` that requests `SAFE` on every publication would keep restarting its own attempt.
+- Between two REACTION requests, the later supersedes the earlier, and the earlier is reported `PREEMPTED`. Two things are open: whether REACTION requests need an order among themselves, and whether supersession at equal authority deserves a reason of its own.
+
+## 31.3 Safe Preemption Points
+
+A superseded attempt cannot simply stop wherever it happens to be. A transition body issues commands to the physical world, and some sequences of commands are safe only as a whole:
+
+```text
+DRIVE.enabled = true       # the drive takes hold first
+BRAKE.engage = false       # and only then does the brake let go
+```
+
+Stopping between these two lines leaves the cart held by both. Written in the other order, stopping between them would leave it held by neither.
+
+**Settled:** an attempt is preempted only at a *safe preemption point*. A safe preemption point is a place where the compiler or runtime can guarantee that stopping leaves no unsafe or inconsistent intermediate condition.
+
+Two kinds of point are safe by construction:
+
+- **transition boundaries**, between the steps of a plan, where one transition body has completed;
+- **`await`**, where the body has issued its commands and is waiting on the world.
+
+**Provisional:** these are the points that are guaranteed, not necessarily the only ones. The compiler may identify others where it can show that preemption is harmless, such as a stretch of a body that only reads. What that analysis may rely on is open. So is whether consecutive writes to inputs within a body should publish as one coherent set, the way `expose` does (§18).
+
+**Worst-case preemption latency** is the longest execution between consecutive safe points. The compiler should report it for each transition wherever it can bound that execution. An `await` does not lengthen it, however long its `within`, because the `await` is itself a safe point.
+
+**Planning after preemption starts from newly observed reality.** No stored label records that the cart is "halfway to `AT(3.2m)`". The new plan begins from whichever state predicates the published values now satisfy. This follows directly from §23, and it is the strongest argument for §23: a label would be stale at exactly the moment it matters.
+
+Two further consequences follow:
+
+- **Nothing is rolled back.** A preempted body's commands have already reached the world, and the world cannot be undone. The next plan starts from what those commands did.
+- **Observed reality may match no declared state.** Then there is nowhere to plan from, and the result is `NO_PATH`. Showing that a program's states cover every reality it can reach is a job for later static analysis (§33). Meanwhile a program can make coverage true by construction, as §40's `MOVING` and `STOPPED` do.
 
 ---
 
 # 32. Relationship to Classical AI
 
-The reactive transition model resembles classical AI state-space planning.
+The REACTION transition model resembles classical AI state-space planning.
 
 A world may be represented by predicates such as:
 
@@ -1589,12 +1816,12 @@ The present language avoids exposing traditional predicate-logic syntax to the p
 Ordinary expressions already provide usable predicates:
 
 ```text
-MOTOR_CONTROL.speed == 0m/s
+abs(MOTOR_CONTROL.speed) < 0.01m/s
 BRAKE.engaged
 BATTERY.voltage > 11V
 ```
 
-The compiler can translate those expressions into an internal representation suitable for planning.
+The compiler can translate those expressions into an internal representation suitable for planning. `require` (§25.1) plays the part of a classical precondition, and a transition's target state plays the part of its effect.
 
 The design therefore borrows a powerful idea from classical AI without forcing the programmer to write an AI-specific logic language.
 
@@ -1613,8 +1840,9 @@ The likely model is closer to Ada/SPARK-style static reasoning, but potentially 
 - bounded operations;
 - published dependencies;
 - state predicates;
-- transition topology;
+- transition topology and requirements;
 - transition reachability;
+- safe preemption points;
 - actuator constraints;
 - failure paths.
 
@@ -1636,146 +1864,279 @@ every path to SAFE disables propulsion
 CONTROL_TIMING failure always produces a safe actuator configuration
 ```
 
+```text
+every reality the machine can reach satisfies some declared state
+```
+
 But no proof syntax should be designed until the execution model is complete.
 
----
+Decisions made now should keep that analysis possible. That is part of the reason for several of them:
 
-# 34. AUTONOMY — CURRENTLY PROVISIONAL
-
-The autonomy layer is deliberately not nailed down yet.
-
-Initial brainstorming suggested it would need to:
-
-- choose goals;
-- decompose goals;
-- select among alternatives;
-- observe lower-level results;
-- replan after failure;
-- remember context;
-- reason under uncertainty;
-- gather information;
-- coordinate objectives;
-- decide when to stop or abandon a goal.
-
-However, this list strongly resembles the existing **Conatus** architecture.
-
-This raises an important possibility:
-
-> The autonomy layer may not need to become a large new language subsystem.
-
-Instead, the language may provide the deterministic substrate and interface that Conatus needs.
+- states are predicates over declared publications;
+- the transition graph is fixed at compile time (§23.2, §37);
+- requirements name their dependencies;
+- preemption happens only at points the compiler can identify.
 
 ---
 
-# 35. Possible Conatus Mapping
+# 34. PROACTION — UNDER ACTIVE DESIGN
 
-The mapping currently looks roughly like:
+PROACTION is the layer that decides what should happen next, including acting on its own initiative. It is the least settled part of R9, and deliberately so. This section records what is decided, what PROACTION must eventually do, and the research directions being explored. It proposes no grammar.
 
-### Goals and goal choice
+## 34.1 What Is Settled
 
-Conatus impetitive and aversive drives.
+- **PROACTION is part of R9, and it runs on the system.** R9 is for genuinely autonomous machines. An R9 system must be capable of autonomous operation without depending on any external intelligence service.
+- **External services are resources, not the layer.** LLMs, databases, other agents, remote computers and human operators may be available to PROACTION, and it should be able to use them well. None is required. None holds authority that PROACTION itself does not have.
+- **PROACTION proposes; the layers below retain authority** (§31.1). It acts on the physical world by requesting states and observing results, even when it runs on board.
+- **PROACTION plans above the transition planner, not within it.** REACTION's planner answers whether a known state is reachable. PROACTION decides which states to pursue, in what order and for what reason, and what to do when REACTION says no.
+- **PROACTION will be substantially more dynamic than the layers below.** The restrictions of §4 and §14 exist to make REALTIME timing trustworthy. They are not goals for PROACTION.
 
-### Goal decomposition and deliberation
+## 34.2 What PROACTION Must Eventually Do
 
-Contemplative Cursor (CC).
+**Requirements, not features.** PROACTION must eventually support:
 
-### Execution of known sequences
+- decision-making and ordinary internal logic;
+- choosing objectives, including on its own initiative;
+- deliberation, and planning above the deterministic transition planner;
+- memory, and the use of accumulated knowledge and history;
+- learning or adaptation where appropriate (§37 limits how learning reaches the layers below);
+- communication with outside systems (§34.4).
 
-Real-Time Cursor (RTC), though deterministic portions may increasingly migrate into the reactive transition planner.
+## 34.3 Data: Research Directions
 
-### Observation
+**Open research.** Nothing in this subsection is a settled language feature or syntax.
 
-Published component state and transition outcomes.
+An intelligent agent works over far more knowledge than a control loop does, and keeps it for longer than a power cycle. PROACTION will probably need ordinary rich programming facilities plus substantial data manipulation, memory, persistence, retrieval and reasoning. The current exploratory requirements are:
 
-### Replanning after failure
+- rich records and nested structures;
+- dynamically sized lists;
+- dictionaries or maps;
+- sets and similar collections;
+- graph-like relationships, with traversal and search;
+- persistent object identity;
+- long-term data storage;
+- collections larger than available RAM;
+- transparent or low-burden caching between RAM and persistent storage such as flash, SD card or disk;
+- efficient query and index facilities, so that persistent collections do not require complete scans;
+- streaming and iteration over data larger than memory;
+- historical data;
+- potentially extensible indexing, such as semantic, vector or other intelligent retrieval.
 
-CC.
+### Three concerns, kept separate
 
-### Learned successful behavior
+One promising principle is to separate:
 
-Conatus sequence corpus.
+1. **logical data structure**: what the data is;
+2. **physical storage policy**: where it lives, and what is kept in RAM;
+3. **query and index strategy**: how it is found.
 
-### Substitution and novel approaches
+Conceptually, and not as decided syntax:
 
-Mind Splicer / analogical reasoning.
+```text
+persistent list<Observation>
+persistent map<ObjectId, Object>
+persistent graph<Memory, Relation>
+```
 
-### Graded success
+A persistent collection might be logically much larger than RAM, while the runtime keeps only an appropriate working set cached in memory. The programmer should ideally work with the logical collection, rather than opening, reading, seeking and deserializing by hand.
 
-Drive satisfaction rather than a simple success/failure bit.
+Similarly, queries should ideally execute close to the storage representation, so that something conceptually like:
+
+```text
+observations.where(...)
+```
+
+can use an index or a storage-aware query plan instead of loading every observation into RAM.
+
+The current north star is:
+
+> **Make large, persistent, searchable knowledge feel like ordinary data.**
+
+This is the move §27 already makes for reaching states, applied to memory: state what is wanted, and let the system determine how to obtain it.
+
+### Graphs
+
+Graph-like storage and search deserve particular attention. An intelligent agent may need relationships among observations, experiences, concepts, states, actions, outcomes, evidence, objects, locations and other knowledge.
+
+We do not yet know whether `graph` should be a first-class type, a way of organizing collections, a standard library facility, or something more general.
+
+### Questions deliberately kept open
+
+- the status of `graph`, as above;
+- persistent identity across restarts, and across a record type that changes while stored data still has the old shape;
+- durability: what a persistent collection guarantees when power fails during a write, and whether that needs transactions;
+- how the cost of a query is bounded, and whether the compiler can report a query's plan the way it reports timing evidence;
+- how a working set is sized against a process's memory budget, and what is evicted;
+- which indexing techniques are practical on small targets, and how new ones are added;
+- how recorded history relates to publication. A publication already carries a sequence number and an observation time (§18.1), and these are natural keys for a history of what was observed.
+
+### What RV-9 offers today
+
+- **No allocation in modules.** An RV-9 module gets a stack and a fixed statics area, and nothing else. RV-9's alignment notes treat this as a good starting point: a heap for PROACTION should be *introduced* already bounded and per class, rather than fenced off later from a general allocator.
+- **Memory classes and budgets** (RV-9 `docs/design.md` §35). When ordinary work exhausts memory, the result is a refusal, not a failure of control. That is what lets PROACTION be dynamic without endangering REALTIME.
+- **Storage.** There is a flash filesystem (`/f0`) and a RAM disk (`/r0`), and an SD card (`/sd0`) is planned. Any persistent collection kept on flash must respect flash wear.
+
+## 34.4 Interfaces
+
+### PROACTION to REACTION
+
+**Settled in principle:** PROACTION normally requests desired states, with arguments (§23.2), and observes published state and attempt results. It does not bypass REACTION to manipulate physical devices.
+
+**Provisional:** the compiler emits a machine-readable description of this boundary, much as RV-9 publishes its target profile. It would contain:
+
+- the published values that may be observed, with dimension and representation;
+- the states that may be requested, with parameter dimensions;
+- the attempt reasons (§29);
+- a hash of the whole, so that a PROACTION built against a different program is refused rather than misunderstood.
+
+The same description would serve PROACTION on the machine and any outside system that reaches it.
+
+**Open:** whether PROACTION may request every state, or only the states a program marks as requestable.
+
+### PROACTION to outside systems
+
+**Open.** R9 should eventually have clean mechanisms through which PROACTION communicates with remote systems, LLMs, databases, other agents, human operators and network services. None is designed yet.
+
+**Settled in principle:** anything arriving from outside is information for PROACTION to weigh. It gains no authority by arriving. An outside suggestion reaches the world only as a request that PROACTION chooses to make, through the boundary above.
+
+**Provisional:** losing a link is published state, like any other failure (§22). Whatever terminates the link can turn absence into a value, for example by publishing that a peer's lease has lapsed, and REACTION responds with `watch`.
+
+## 34.5 Targets, and the Link
+
+**R9 is meant to span autonomous-system targets.** RV-9 on the ESP32-C5 is an important first platform and proving ground. It is not the size PROACTION must fit.
+
+On that board as configured today, RV-9 measures (RV-9 `docs/design.md` §35):
+
+- about 38 KB of heap free at idle, of which about 17 KB is available to programs;
+- about 7 KB for each SSH session, leaving 3.4 KB for programs while one command runs inside a session;
+- a default memory budget of 32 KB for each process tree;
+- no dynamic allocation in modules at all.
+
+PROACTION as §34.2 and §34.3 describe it will not fit there as the board is presently configured. That is a fact about the first target, not a limit on the design. Plausible arrangements include a larger RV-9 target, or REALTIME and REACTION on the C5 with PROACTION on a companion system. Whichever is used, the authority boundary is the same.
+
+When any part of PROACTION, or anything it talks to, is off the board, the link is a **joint R9/RV-9 design problem**. No protocol is chosen. What is known:
+
+- `rshd` has no authentication, so it is not acceptable for a link that can request states.
+- SSH is authenticated, but RV-9 supports one session at a time, and a session costs about 7 KB.
+- A lighter authenticated transport may fit better. Nothing has been selected.
+
+---
+
+# 35. Conatus: An Example, Not the Target
+
+Conatus is a separately developed architecture for autonomous agents. It is a useful source of analogies for PROACTION. It is **not** the target architecture for R9. R9 should make it possible to implement or integrate a Conatus-like system, but it must not be designed around Conatus.
+
+Earlier drafts of this document described Conatus by analogy. As of its repository on 2026-09-13:
+
+- **It is driven by values, not by drives or goals.** Valence is a number from −1 to 1. *Encoded* valence comes from configuration and is authoritative. *Learned* valence is adjusted by the agent. The current specification does not use the terms "impetitive" or "aversive". It says explicitly that values take priority over goals and instructions.
+- **Its Contemplative Cursor (CC) is a large language model.** It is currently a hosted model, and a local model of about 30B parameters on a 24 GB GPU is planned. The CC writes, scores and repairs sequences.
+- **Its Real-Time Cursor (RTC) steps through prepared sequences.** Despite the name, it is **unrelated to R9 REALTIME**. It has no periods or deadlines, and its waits last from hours to months.
+- **Its sequence corpus is its procedural memory.** The corpus is compressed by lifting recurring structure into named sequences.
+- **"Mind Splicer" is not part of the current specification.** The nearest idea, substitution problem-solving, is planned but not built.
+- **Its structural gate checks that sequences are well formed.** It is not a physical safety authority, and R9 must not treat it as one.
+- **Its deliberation does not run on the current RV-9 target.** It needs a GPU-class machine.
+
+Ideas worth borrowing for PROACTION:
+
+- **Deliberation keeps a runway ahead of execution.** A slow deliberative process prepares work so that a deterministic executor never has to wait for it. PROACTION might prepare requests for REACTION in the same way.
+- **Likely success is estimated from history, keyed by context.** R9 attempt results (§29), recorded together with the states that held when each attempt began, are exactly such a history.
+- **Degradation is graceful.** A Conatus deployment keeps executing prepared work when deliberation is unavailable. An R9 system should likewise keep its REALTIME and REACTION behavior, and whatever PROACTION can do locally, when a remote resource disappears.
+
+If Conatus is used with R9, it would either be an external resource that PROACTION consults, or a source of ideas implemented within PROACTION. Either way, its choices reach the world through the boundary in §31. Its preference for values over instructions would operate within PROACTION, never above REACTION.
 
 ---
 
 # 36. Potential Long-Term Architecture
 
 ```text
-                 CONATUS
-        goals / drives / values
-        CC / deliberation
-       learning / analogy
+     OPTIONAL EXTERNAL RESOURCES
+   LLMs / databases / other agents /
+   human operators / remote systems
+                 :
+                 :  information, not authority
+                 v
+             PROACTION
+    objectives / deliberation
+    memory / knowledge / learning
+                 |
+    requests states; observes results
+                 v
+             REACTION
+     watch / state / transition
                  |
                  v
-         AUTONOMY INTERFACE
+             REALTIME
+     timing / devices / expose
                  |
                  v
-          REACTIVE LAYER
-      watch / state / transition
+               RV-9
+      admission / scheduling
+      devices / failsafe / telemetry
                  |
                  v
-          REAL-TIME LAYER
-      timing / devices / expose
-                 |
-                 v
-                RV-9
-     admission / scheduling
-     devices / failsafe / telemetry
-                 |
-                 v
-           PHYSICAL WORLD
+          PHYSICAL WORLD
 ```
 
-This suggests a useful principle:
+This keeps a useful principle:
 
 > **Intelligence proposes; deterministic machinery retains authority.**
 
-The autonomy system may request:
+PROACTION may request:
 
 ```text
-transition AT_LOADING_DOCK
+transition AT(LOADING_DOCK)
 ```
 
-The reactive layer decides whether and how that known state can be reached.
+REACTION decides whether and how that state can be reached.
 
-The real-time layer ensures the physical actions occur with deterministic timing and safety.
+REALTIME ensures that the physical actions occur with deterministic timing and safety.
 
 ---
 
 # 37. Behavioral Crystallization
 
-There is a potentially important learning hierarchy:
+**Exploratory, with one settled limit.**
+
+Behavior may begin high in the system and move downward as it becomes understood:
 
 ```text
-CC discovers
+PROACTION discovers a behavior
       ↓
-RTC executes and validates
+it is exercised and validated
       ↓
-stable behavior becomes known
+it becomes stable and well understood
       ↓
-deterministic behavior can migrate into transition machinery
+it moves into deterministic REACTION machinery
 ```
-
-In other words:
-
-> **Novel behavior starts high in the intelligent system and can move downward as it becomes understood, reliable, and deterministic.**
 
 This may allow autonomous systems to become less computationally expensive and more predictable over time.
 
-This concept remains exploratory but is strongly compatible with Conatus.
+**Settled:** learning never modifies the compiled REACTION transition graph at runtime. A stabilized behavior may instead be exported or generated as candidate R9 source. It then passes through the same path as anything a person writes:
+
+```text
+learned behavior
+    -> candidate R9 transition/source
+    -> static analysis
+    -> proof/checking
+    -> compile
+    -> deployment
+```
+
+What PROACTION learns at runtime may still change what it chooses to request, because that is within its own authority. It cannot change what REACTION will allow.
+
+This preserves the possibility of strong static guarantees.
+
+**Open:**
+
+- the exact workflow, including whether and where human review is required;
+- what evidence a candidate must carry;
+- how a new REACTION program replaces a running one without leaving the world undefined. RV-9 can already load modules at runtime without reflashing.
 
 ---
 
 # 38. Current Special Vocabulary
 
-The language is intentionally small.
+The language is intentionally small. `placement` has replaced `priority`, which is no longer a word in R9 (§13.1).
 
 ## General
 
@@ -1792,7 +2153,7 @@ within
 return
 ```
 
-## Real-Time
+## REALTIME
 
 ```text
 realtime
@@ -1800,22 +2161,31 @@ every
 on
 minimum_interval
 deadline
-priority
+placement
+input
 expose
+limit
 failsafe
 fault
-limit
+on stop
 ```
 
-Some of these may ultimately be ordinary library or declaration concepts rather than hard keywords.
+`on stop` reuses `on`. `fault` is shared with REACTION, where it ends a transition (§15.2). The surface syntax of `placement` and `input` is provisional. Some of these words may ultimately be ordinary library or declaration concepts rather than hard keywords.
 
-## Reactive
+## REACTION
 
 ```text
 watch
 state
 transition
+require
 ```
+
+`watch` also takes `within ... else` for silence (§21.1, provisional). States may take parameters (§23.2, provisional).
+
+## PROACTION
+
+No vocabulary yet, deliberately (§34).
 
 This is intentionally tiny.
 
@@ -1840,9 +2210,12 @@ malloc
 free
 try
 catch
+priority
 ```
 
-Some may eventually exist in lower-level runtime libraries or the future proof system, but none is currently needed as a central language abstraction.
+Some may eventually exist in lower-level runtime libraries or the future proof system, but none is currently needed as a central language abstraction. `priority` was replaced by `placement` (§13.1). Silence is handled by `watch ... within`, not by an event (§21.1).
+
+PROACTION's needs (§34.3) will test this list hardest. Additions made for it should still meet the rule below.
 
 The design should resist vocabulary growth unless a concrete problem cannot be expressed cleanly with existing constructs.
 
@@ -1850,50 +2223,108 @@ The design should resist vocabulary growth unless a concrete problem cannot be e
 
 # 40. Representative Example
 
-The following example demonstrates the current shape of the language.
+The following example shows the current shape of REALTIME and REACTION. PROACTION has no syntax yet.
+
+A shuttle cart runs on a straight track, driven by a motor and held by a brake.
 
 ```text
-const MAX_SPEED = 2m/s
-const MIN_VOLTAGE = 10.5V
+# Names this example takes from outside itself:
+#   devices    encoder, motor, brake, cell_monitor
+#              (bound to RV-9 paths by the build; the binding syntax is open, §42)
+#   functions  pid, abs (standard library)
+
+const STILL       = 0.01m/s     # a measured speed below this is "not moving" (§23.1)
+const ARRIVED     = 5mm         # how close counts as "at" a position
+const TRACK_START = 0m
+const TRACK_END   = 6m
+const MIN_CHARGE  = 20%         # needed to start a trip
+const CRITICAL    = 10%         # below this, stop; the gap up to MIN_CHARGE is hysteresis
 
 
-realtime MOTOR_CONTROL every 1ms
+realtime DRIVE every 1ms
+    deadline 800us
 
-    input target_speed
+    input goal = 0m             # provisional: the value used until first written (§19)
+    input enabled = false
 
+    let position = encoder.position
     let speed = encoder.speed
-    let voltage = battery.voltage
 
-    let error = target_speed - speed
-    let output = pid(error)
+    let output = pid(goal - position)
+    if enabled == false
+        output = 0%
+    end
 
     limit output to -75% .. 75%
 
-    motor.left = output
-    motor.right = output
+    motor.power = output
 
-    expose speed, voltage
+    let powered = enabled
+    expose position, speed, powered
 
 end
 
+failsafe DRIVE
+    motor.power = 0%
+end
+
+
+realtime BRAKE every 10ms
+
+    input engage = true
+
+    brake.command = engage
+    let engaged = brake.closed
+
+    expose engaged
+
+end
+
+failsafe BRAKE
+    brake.command = true
+end
+
+
+realtime BATTERY every 100ms
+
+    let voltage = cell_monitor.voltage
+    let charge = cell_monitor.charge
+
+    expose voltage, charge
+
+end
+
+
+# MOVING and STOPPED between them cover every reality,
+# so a plan always has somewhere to start (§31.3).
+
+state MOVING
+    abs(DRIVE.speed) >= STILL
+end
 
 state STOPPED
-    MOTOR_CONTROL.speed == 0m/s
+    abs(DRIVE.speed) < STILL
 end
 
-
 state SAFE
-    MOTOR_CONTROL.speed == 0m/s
+    abs(DRIVE.speed) < STILL
     BRAKE.engaged
-    MOTOR_CONTROL.enabled == false
+    DRIVE.powered == false
+end
+
+state AT(target)                # target's dimension is inferred from DRIVE.position (§23.2)
+    abs(DRIVE.position - target) < ARRIVED
+    abs(DRIVE.speed) < STILL
+    BRAKE.engaged
 end
 
 
 transition MOVING -> STOPPED
 
-    MOTOR_CONTROL.target_speed = 0m/s
+    DRIVE.goal = DRIVE.position       # hold where it is now
+    DRIVE.enabled = true
 
-    await MOTOR_CONTROL.speed == 0m/s within 5s
+    await abs(DRIVE.speed) < STILL within 5s
     else
         fault STOP_TIMEOUT
     end
@@ -1903,30 +2334,72 @@ end
 
 transition STOPPED -> SAFE
 
-    BRAKE.engaged = true
-    MOTOR_CONTROL.enabled = false
+    BRAKE.engage = true               # the brake takes hold first
+    await BRAKE.engaged within 500ms
+    else
+        fault BRAKE_TIMEOUT
+    end
 
-end
-
-
-watch MOTOR_CONTROL.voltage
-
-    if MOTOR_CONTROL.voltage < MIN_VOLTAGE
-
-        let attempt = transition SAFE
-
-        await attempt.status == SUCCEEDED or attempt.status == FAILED
-
-        if attempt.status == FAILED
-            transition EMERGENCY_SAFE
-        end
-
+    DRIVE.enabled = false             # and only then is the drive released
+    await DRIVE.powered == false within 50ms
+    else
+        fault DRIVE_TIMEOUT
     end
 
 end
+
+
+transition SAFE -> AT(target)
+
+    require BATTERY.charge > MIN_CHARGE
+    require target >= TRACK_START and target <= TRACK_END
+
+    DRIVE.goal = DRIVE.position       # hold here
+    DRIVE.enabled = true              # the drive takes hold first
+    await DRIVE.powered within 50ms
+    else
+        fault DRIVE_TIMEOUT
+    end
+
+    BRAKE.engage = false              # and only then does the brake let go
+    DRIVE.goal = target
+
+    await abs(DRIVE.position - target) < ARRIVED and abs(DRIVE.speed) < STILL within 2min
+    else
+        fault TRAVEL_TIMEOUT
+    end
+
+    BRAKE.engage = true
+    await BRAKE.engaged within 500ms
+    else
+        fault BRAKE_TIMEOUT
+    end
+
+end
+
+
+watch BATTERY.charge within 1s
+
+    if BATTERY.charge < CRITICAL
+        transition SAFE
+    end
+
+else
+    transition SAFE                   # the battery monitor has gone silent
+end
 ```
 
-The exact syntax will evolve, but this example captures the semantics currently intended.
+What the example shows:
+
+- **Planning from wherever the cart is.** From `SAFE`, a request for `AT(3.2m)` plans the single step `SAFE -> AT(3.2m)`. From a moving cart, the plan is `MOVING -> STOPPED -> SAFE -> AT(3.2m)`.
+- **No `AT -> …` transition is needed.** A cart already at one position that is asked for another also satisfies `STOPPED`, so its plan is `STOPPED -> SAFE -> AT(…)`. This falls out of states being predicates.
+- **Preemption.** If charge falls below `CRITICAL` in the middle of a trip, the `watch` requests `SAFE`. REACTION outranks whatever asked for the trip, so that attempt ends `PREEMPTED` at its next safe point, the travel `await`. Planning then starts from what is observed, `MOVING`, rather than from where the trip was.
+- **Preconditions with reasons.** Until charge is back above `MIN_CHARGE`, a new request for any `AT(…)` fails `PRECONDITION_FAILED` and names `BATTERY.charge > MIN_CHARGE`. A request for `AT(9m)` fails at any charge and names the track limit.
+- **Silence.** If `BATTERY` stops publishing for a second, the `else` path requests `SAFE`.
+- **Component faults.** If `DRIVE` or `BRAKE` faults, RV-9 applies its failsafe, and the fault is published in the component's cell (§15). A transition awaiting that component fails `COMPONENT_FAILED`.
+- **Order of commands.** Every hand-over between brake and drive is ordered so that something always holds the cart, and each hand-over is separated by an `await`. That makes every point where preemption can happen safe (§31.3).
+
+Whatever PROACTION becomes, it would reach this machine only by requesting states such as `AT(3.2m)` and observing the published values and attempt results.
 
 ---
 
@@ -1958,7 +2431,7 @@ Potentially unbounded or nondeterministic behavior should be explicit.
 
 ### 6. Reactive behavior should be dependency-driven
 
-Watch actual changing values rather than continuously reevaluating arbitrary conditions.
+Watch actual changing values, and their silence, rather than continuously reevaluating arbitrary conditions.
 
 ### 7. State describes reality
 
@@ -1972,17 +2445,25 @@ Ask for a desired state; allow deterministic planning machinery to determine the
 
 Use `watch` plus ordinary logic and transitions.
 
-### 10. Intelligence belongs above deterministic machinery
+### 10. Authority stays with deterministic machinery
 
-Autonomy may decide what should happen. Reactive and real-time layers retain control over what can safely and deterministically happen.
+PROACTION may decide what should happen, including on its own initiative. REACTION and REALTIME retain control over what can safely and deterministically happen.
 
 ### 11. Proofing comes last
 
-First stabilize execution semantics. Then build static reasoning over a well-defined model.
+First stabilize execution semantics. Then build static reasoning over a well-defined model. Meanwhile, make decisions that keep that reasoning possible.
 
 ### 12. The compiler describes; RV-9 enforces
 
 R9 should communicate requirements and static evidence in machine-readable form. RV-9 should admit against actual resources, enforce what it can, measure what it cannot prove, and make disagreement observable.
+
+### 13. Reality is re-observed, not remembered
+
+Planning, preemption and recovery start from what published values show now, never from a stored label for where the system believes it is.
+
+### 14. Autonomy is intrinsic
+
+An R9 system must be able to act autonomously by itself. External intelligence is a resource it may use, not a dependency.
 
 ---
 
@@ -1990,25 +2471,42 @@ R9 should communicate requirements and static evidence in machine-readable form.
 
 The following remain intentionally unresolved.
 
-## Real-Time
+These are settled since the first draft and no longer open:
+
+- derived priority and `placement` (§13.1);
+- deadline and runaway faults (§15.6);
+- the publication ABI and declared cells (§18.1).
+
+## REALTIME
 
 Mostly implementation and target-contract details:
 
-- final R9 bundle, publication, and mailbox ABI with RV-9;
-- exact RV-9 admission and scheduler contract;
-- exact default priority policy;
+- final R9 bundle and mailbox ABI with RV-9;
+- the surface syntax of `placement`, and whether a `routine` bound should ever be trusted for a hard deadline (§13.1);
 - final syntax for event-released components;
 - whether `budget` or `phase` is eventually necessary;
 - final overflow rules for physical quantities;
-- exact input declaration syntax;
+- exact `input` syntax, including an input's value before its first write (§19);
 - details of RT-safe standard library functions;
-- machine-readable device latency and ownership metadata;
-- exact restricted failsafe representation (see §15.1 for `fault`, now defined);
-- how a transition body returns a faulted component to service.
+- how device names bind to RV-9 paths, and machine-readable device latency and ownership metadata;
+- exact restricted failsafe representation (see §15.1 for `fault`);
+- how a transition body returns a faulted component to service (§15.5).
 
-## Reactive
+## REACTION
 
-Mostly implementation/planning details:
+The architecture is considered settled enough to implement and test.
+
+Provisional syntax and semantics that still need refinement:
+
+- the form of tolerances in predicates, and whether states need hysteresis or dwell (§23.1);
+- parameterized states: declared or inferred parameter types, and whether parameterized states may be transition sources or intermediate steps (§23.2);
+- `require`: where it may appear, and whether a requirement found false during execution fails the attempt or replans (§25.1);
+- the exact semantics of `watch ... within ... else` (§21.1);
+- arbitration among REACTION requests, and whether supersession at equal authority needs its own reason (§31.2);
+- safe preemption points beyond transition boundaries and `await`, and whether consecutive input writes publish as one set (§31.3);
+- the representation of attempt diagnostics (§29).
+
+Implementation questions:
 
 - exact internal transition-planning algorithm;
 - how overlapping predicates/states are represented;
@@ -2017,28 +2515,31 @@ Mostly implementation/planning details:
 - how planner cycles and impossible goals are diagnosed;
 - exact lifetime and scoping rules for transition result objects.
 
-The architecture itself is considered settled enough to implement and test.
+## PROACTION
 
-## Autonomy
+Open research and design:
 
-Still open:
-
-- whether autonomy needs additional language constructs at all;
-- whether Conatus directly supplies the autonomy layer;
-- interface between CC/RTC and transition planning;
-- representation of goals and drives;
+- its execution model, and what grammar it needs at all;
+- rich, persistent and larger-than-memory data, queries and indexes, and the status of `graph` (§34.3);
+- the machine-readable boundary between PROACTION and REACTION, and which states may be requested (§34.4);
+- mechanisms for communicating with outside systems, and the transport for any off-board link (§34.4, §34.5);
+- how PROACTION is given memory on RV-9, and which targets it runs on (§34.3, §34.5);
+- learning and adaptation: what may change at runtime, and the path by which stable behavior becomes REACTION source (§37);
 - uncertainty and probabilistic reasoning;
-- long-term memory/context representation;
-- how novel discovered behavior becomes reusable deterministic machinery;
-- whether an explicit autonomy API is sufficient.
+- long-term memory and context representation;
+- which ideas from Conatus or other architectures are worth adopting (§35).
+
+## Proofing
+
+Proofing is a later phase (§33). Until then, decisions in every layer should keep strong compile-time analysis possible.
 
 ---
 
 # 43. Current Working Summary
 
-The language currently has a clear two-layer deterministic foundation.
+R9 has a relatively mature REALTIME foundation, a REACTION layer that is becoming well defined, and a PROACTION layer under active design.
 
-### Real-Time
+### REALTIME
 
 ```text
 realtime
@@ -2046,26 +2547,32 @@ every
 on
 minimum_interval
 deadline
-within
+placement
+input
 expose
+limit
+failsafe
+fault
+on stop
 ```
 
-It executes periodic or event-released physical behavior predictably, publishes coherent observations, and compiles its resource requirements into contracts that RV-9 can admit, enforce, and measure.
+It executes periodic or event-released physical behavior predictably and publishes coherent observations. It leaves the physical world defined through declared failsafes when a component fails. It compiles its resource requirements into contracts that RV-9 can admit, enforce, and measure.
 
-### Reactive
+### REACTION
 
 ```text
 watch
 state
 transition
+require
 ```
 
-It observes published reality and uses known transformations to move the system toward declaratively defined states.
+It observes published reality, including silence where a publication was expected. It uses known transformations to move the system toward declaratively defined states, which may be parameterized. A transition is eligible only while its requirements hold. REACTION outranks PROACTION, and planning after preemption starts from newly observed reality.
 
-### Autonomy
+### PROACTION
 
-Not yet finalized.
+PROACTION has no syntax yet. It decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results.
 
-The strongest current hypothesis is that **Conatus may be the autonomy system**, while this language supplies the safe deterministic substrate that connects intelligence to the physical world.
+The next major design question is PROACTION's execution model, and in particular how to:
 
-That is the next major design question.
+> **Make large, persistent, searchable knowledge feel like ordinary data.**
