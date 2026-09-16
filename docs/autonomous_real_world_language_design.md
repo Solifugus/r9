@@ -2125,7 +2125,7 @@ An intelligent agent works over far more knowledge than a control loop does, and
 PROACTION is a general-purpose programming environment, not a log with a program attached. Beyond R9's scalars and physical quantities (§4, §5) it needs at least:
 
 - **records with named attributes**, so related values are grouped and reached by name;
-- **numerically indexed arrays**, including dynamically sized ones where PROACTION needs them.
+- **numerically indexed arrays**, fixed in size for now.
 
 ```text
 observation.temperature
@@ -2136,7 +2136,9 @@ observations[0]
 observations[1]
 ```
 
-Declaration and type syntax remain to be designed. Dynamically sized arrays are the first thing in R9 that needs a heap, which RV-9 modules do not have today (see *What RV-9 offers today*, below).
+Declaration and type syntax remain to be designed.
+
+**Arrays stay fixed in size for the moment.** Dynamic sizing is the first thing in R9 that would need a heap, and RV-9 modules cannot allocate at all today (see *What RV-9 offers today*, below). Whether PROACTION gets one, and how it is bounded per class, is a question for RV-9 rather than something R9 should assume. In the meantime the growth that PROACTION actually cannot avoid — its history — is carried by the log below, which is bounded by design rather than by hope.
 
 ### A historical log
 
@@ -2159,6 +2161,12 @@ Entries can be viewed and searched with absolute times, or as durations relative
 
 Relative views are how temporal patterns around a significant event become visible, which is exactly what deciding and learning need.
 
+**Bounded, and curtailed automatically.** Memory is not eternal. A log that grows forever is a fault waiting to happen, so a log is a **FIFO with a declared limit**: when it is full, the oldest entries go. Losing them is ordinary operation, never an error.
+
+- **A window in RAM over a larger log in storage.** What is held in memory is a bounded window. The log itself may be far larger, on flash, an SD card or a disk. Moving the window is reading, and it costs what storage costs: searching within the window is cheap, and searching beyond it is not. That difference should be visible rather than hidden, as with any other query (*Three concerns, kept separate*, below).
+- **Curtailment is recorded.** Where entries have been discarded, the log says so. A reader must be able to tell "nothing happened then" from "that is no longer here" — a system reasoning from its own history will otherwise conclude the first when the second is true.
+- **Appending stays cheap.** Space is reclaimed in whole segments rather than line by line, which is also what flash erase blocks want.
+
 **Not in the initial form:** no graph edges, embeddings, tags, similarity or other speculative metadata. Text and a time.
 
 **But the representation must stay extensible.** A later revision should be able to associate further metadata with entries without altering their text and without invalidating logs already written. That needs stable entry identity to attach anything to, which argues for identity now even though nothing yet uses it.
@@ -2167,9 +2175,10 @@ Relative views are how temporal patterns around a significant event become visib
 
 **Open:**
 
-- **Retention.** A log grows without bound and flash does not. What rotates, what is summarised, what is thrown away, and who decides.
+- **The limit.** Whether it is expressed in bytes, in entries, or as a time span — though a span cannot bound size unless the rate is bounded too. Whether a system has one log or several, each with its own limit. And whether anything is summarised on the way out, or simply dropped.
 - **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
 - **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
+- **Power failure.** What happens to the unflushed tail, and how a partially written entry is recognised when the log is next opened.
 
 ### Three concerns, kept separate
 
@@ -2795,7 +2804,8 @@ Open research and design:
 - ordering pursuits by importance when they contend, and whether starvation needs an answer (§34.3);
 - how concurrent computation is expressed, and how its results return to the authority (§34.3);
 - authority domains: how they are declared, when a pursuit's domains are known, and how they are acquired without deadlock (§34.3);
-- the historical log: retention on a small target, entry identity for later metadata, and how it is searched (§34.4);
+- the historical log: what its limit is expressed in, one log or several, what a power failure costs, entry identity for later metadata, and how it is searched (§34.4);
+- whether PROACTION gets dynamically sized arrays, and the bounded heap RV-9 would have to grow for them (§34.4);
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
