@@ -3,8 +3,8 @@
 ## Language Design for Autonomous Real-World Systems
 
 **Status:** Draft design capture  
-**Scope:** REALTIME is relatively mature. REACTION is becoming well defined; parameterized states, transition requirements, arbitration and preemption, and publication silence still need refinement.  
-**Open area:** PROACTION is deliberately unsettled, and is described by requirements, boundaries and research directions rather than grammar.
+**Scope:** The architecture of all three layers is now covered. REALTIME is relatively mature. REACTION is well defined in shape, with several constructs still provisional. PROACTION has a settled architecture — serialized authority, authority domains, a bounded log, ordinary program data — and no grammar.  
+**Open area:** PROACTION's grammar, and the concrete syntax of the language as a whole, which §40 gives by example rather than by definition. §42 lists what remains open in each layer.
 
 **Markers.** Where the distinction matters, text is marked:
 
@@ -2152,7 +2152,16 @@ An entry is **bounded text with attributes**. The text is what a program writes.
 
 - **`time`** — when the entry was made, assigned by the store.
 
-Later revisions will add more. The text is content, and the attributes are not part of it. An attribute the store assigns cannot be forged by writing a line, which is the division §34.5 relies on. An attribute a *writer* supplies is a claim rather than knowledge, and the two must not read alike — see *Anchored attributes*, and the open question below.
+Later revisions will add more. The text is content, and the attributes are not part of it. An attribute the store assigns cannot be forged by writing a line, which is the division §34.5 relies on. An attribute a *writer* supplies is a claim rather than knowledge, and the two must not read alike.
+
+**Every attribute carries its origin.** Two kinds exist, and the distinction is §14's, applied to knowledge rather than to execution bounds:
+
+- **assigned** — the store knows it, as it knows `time`;
+- **declared** — a writer claims it, as with an anchored value (below).
+
+A reader can always ask which it is, and a projection can show it. A program reading attributes as fields receives the origin along with them, so code cannot silently treat a claim as knowledge. Anything a later revision computes for itself, such as an extraction or an index, would be a third kind — **derived** — and would need its own name for the same reason.
+
+*Provisional:* a projection shows values without origin marks unless asked, on the grounds that a view should stay readable. Whether declared values should instead be marked by default is worth revisiting once there is an attribute other than `time`.
 
 Entries can be viewed and searched with absolute times, or as durations relative to a chosen entry or instant:
 
@@ -2216,7 +2225,7 @@ That number is known before the program runs, which puts a log where every other
 - **What happens on the way out.** Whether anything is summarised as it is discarded, or entries simply vanish.
 - **How a projection is written.** Whether it is a list of attributes, a format, or a query, and how the reference point of a relative view is named.
 - **What search matches.** The rendered projection, or the stored text together with predicates over attributes, or both. Anchored attributes sharpen the question: the stored text may hold `0.42` where the projection shows `42%`. Matching what the reader is looking at is the likelier answer.
-- **Attribute origin — a decision to be made.** `time` is assigned by the store and is therefore trustworthy. An anchored value is supplied by whoever wrote the line. Validating the span catches a value that contradicts its own text, but not one written wrongly in both places. Attributes should therefore carry their origin, and a reader must be able to tell the store's knowledge from a writer's claim, as §14 already distinguishes established, declared and observed bounds. Whether a projection shows origin by default, and whether a program may anchor attributes at all in the first revision, is not settled.
+- **Showing origin.** Whether a projection should mark declared values by default, and what a third, derived origin would be called.
 - **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
 - **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
 - **Power failure.** What happens to the unflushed tail, and how a partially written entry is recognised when the log is next opened.
@@ -2895,7 +2904,7 @@ It observes published reality, including silence where a publication was expecte
 
 ### PROACTION
 
-PROACTION decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results. Its decisions and its changes to authoritative state pass through one serialized authority, while the computation behind them may run concurrently and several pursuits may proceed at once over independent authority domains. Its memory of what it has been through is what REACTION deliberately lacks. Beyond the two block forms it has no syntax yet.
+PROACTION decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results. Its decisions and its changes to authoritative state pass through one serialized authority, while the computation behind them may run concurrently and several pursuits may proceed at once over independent authority domains. Its memory of what it has been through is what REACTION deliberately lacks: records, fixed arrays, and one bounded log of timestamped text with attributes. Beyond the two block forms it has no syntax yet.
 
 The next major design question is PROACTION's execution model, and in particular how to:
 
