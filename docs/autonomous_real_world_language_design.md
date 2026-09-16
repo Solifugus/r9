@@ -2116,7 +2116,7 @@ An intelligent agent works over far more knowledge than a control loop does, and
 - historical data;
 - potentially extensible indexing, such as semantic, vector or other intelligent retrieval.
 
-**These are things some architectures will want, not a list to be implemented.** Only ordinary program data and a historical log are proposed below. Lists, maps, sets, graphs, vector stores and specialised knowledge structures must earn their place through a demonstrated R9 requirement, rather than because agent frameworks commonly have them (§34.1: PROACTION encodes no theory of intelligence).
+**These are things some architectures will want, not a list to be implemented.** Only ordinary program data and a historical log are proposed below. Lists, maps, sets, graphs, vector stores and specialised knowledge structures must earn their place through a demonstrated R9 requirement, rather than because agent frameworks commonly have them (§34.1: PROACTION encodes no theory of intelligence). The evidence so far runs that way: an architecture of simple numeric structures and an LLM-assisted one want quite different things, and records, arrays and a log of text serve both. Nothing beyond them has yet been shown necessary.
 
 ### Ordinary program data
 
@@ -2148,7 +2148,11 @@ A machine that decides what to do next needs to remember what happened. The init
 
 > **A log is timestamped lines of text.**
 
-An entry is textual content with a time. The time is metadata: the store assigns it, and it need not appear in the text. That division is the same one §34.5 relies on — what a writer supplies is content, and what the system stamps is not forgeable by writing text.
+An entry is **bounded text with attributes**. The text is what a program writes. The attributes are what the store knows about it, beginning with exactly one:
+
+- **`time`** — when the entry was made.
+
+Later revisions will add more. The text is content, and the attributes are not part of it: the store assigns them, so they cannot be forged by writing a line. That division is the same one §34.5 relies on.
 
 Entries can be viewed and searched with absolute times, or as durations relative to a chosen entry or instant:
 
@@ -2159,14 +2163,21 @@ Entries can be viewed and searched with absolute times, or as durations relative
 +0.287s  REACTION entered SAFE
 ```
 
-Relative views are how temporal patterns around a significant event become visible, which is exactly what deciding and learning need.
+Relative views are how temporal patterns around a significant event become visible, which is exactly what deciding and learning need. The reference may be an instant or an entry, including one found by a search, so "everything within five seconds of the first traction loss" is expressible.
+
+**Reading is a projection.** A read chooses which attributes to show and how to show them. The entries are the same; the view differs. This is ordinary in tools and unusual in a language — `git log --format` and `ps -o` do exactly this — and it is worth the strangeness here, because a log is read far more often than it is written, and by very different readers.
+
+Two properties keep it honest:
+
+- **Whatever a projection shows, text search can match.** Attributes rendered into a view are text like any other, so `grep`-style searching reaches them, and metadata needs no second, structured query language of its own.
+- **Attributes are also reachable as fields.** An entry read by a program is an ordinary record — `entry.text`, `entry.time` — so nothing has to parse back what it just rendered.
 
 **Bounded, and curtailed automatically.** Memory is not eternal. A log that grows forever is a fault waiting to happen, so a log is a **FIFO with a declared limit**: when it is full, the oldest entries go. Losing them is ordinary operation, never an error.
 
 **The limit is a number of entries, with a declared maximum entry length.** Entries are what a program thinks in — the last ten thousand things that happened. A count alone bounds nothing, though, since ten thousand lines may be 400 KB or 40 MB. Declaring the longest an entry may be makes the count a real bound:
 
 ```text
-entries x (maximum entry length + a small header) = the storage this log can ever need
+entries x (maximum entry length + attributes + a small header) = the storage this log can ever need
 ```
 
 That number is known before the program runs, which puts a log where every other R9 resource already is: declared by the compiler, and admitted by RV-9 against what the machine actually has (§16.1). A log too large for the board is refused at admission rather than discovered at three in the morning. It is also how publication already works — a cell is a fixed-size piece of memory, not an open-ended one (§18.1).
@@ -2181,13 +2192,16 @@ That number is known before the program runs, which puts a log where every other
 
 **Not in the initial form:** no graph edges, embeddings, tags, similarity or other speculative metadata. Text and a time.
 
-**But the representation must stay extensible.** A later revision should be able to associate further metadata with entries without altering their text and without invalidating logs already written. That needs stable entry identity to attach anything to, which argues for identity now even though nothing yet uses it.
+**Attributes are the extension mechanism.** A later revision adds attributes without altering entry text and without invalidating logs already written. Two things follow from that. An attribute may be **absent** on older entries, and a projection must show absence as absence rather than as an empty value that reads like one. And entries need stable identity for anything later to attach to, which argues for identity now, even though nothing yet uses it.
 
 **Searching should eventually be powerful and composable**, in the spirit of `grep` and `sed`: text matching, filtering, temporal windows and transformations. Which functions, and in what syntax, is open.
 
 **Open:**
 
 - **What happens on the way out.** Whether anything is summarised as it is discarded, or entries simply vanish.
+- **How a projection is written.** Whether it is a list of attributes, a format, or a query, and how the reference point of a relative view is named.
+- **What search matches.** The rendered projection, or the stored text together with predicates over attributes, or both.
+- **Where an attribute comes from.** Every attribute so far is assigned by the store and therefore trustworthy. Should a program later attach its own, the log needs the distinction §14 already draws for bounds — established, declared, observed — because a program's claim must never read as the store's knowledge.
 - **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
 - **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
 - **Power failure.** What happens to the unflushed tail, and how a partially written entry is recognised when the log is next opened.
