@@ -2163,9 +2163,21 @@ Relative views are how temporal patterns around a significant event become visib
 
 **Bounded, and curtailed automatically.** Memory is not eternal. A log that grows forever is a fault waiting to happen, so a log is a **FIFO with a declared limit**: when it is full, the oldest entries go. Losing them is ordinary operation, never an error.
 
-- **A window in RAM over a larger log in storage.** What is held in memory is a bounded window. The log itself may be far larger, on flash, an SD card or a disk. Moving the window is reading, and it costs what storage costs: searching within the window is cheap, and searching beyond it is not. That difference should be visible rather than hidden, as with any other query (*Three concerns, kept separate*, below).
-- **Curtailment is recorded.** Where entries have been discarded, the log says so. A reader must be able to tell "nothing happened then" from "that is no longer here" — a system reasoning from its own history will otherwise conclude the first when the second is true.
+**The limit is a number of entries, with a declared maximum entry length.** Entries are what a program thinks in — the last ten thousand things that happened. A count alone bounds nothing, though, since ten thousand lines may be 400 KB or 40 MB. Declaring the longest an entry may be makes the count a real bound:
+
+```text
+entries x (maximum entry length + a small header) = the storage this log can ever need
+```
+
+That number is known before the program runs, which puts a log where every other R9 resource already is: declared by the compiler, and admitted by RV-9 against what the machine actually has (§16.1). A log too large for the board is refused at admission rather than discovered at three in the morning. It is also how publication already works — a cell is a fixed-size piece of memory, not an open-ended one (§18.1).
+
+- **A window in RAM over a larger log in storage.** What is held in memory is a bounded window. The log itself may be far larger, on flash, an SD card or a disk. Moving the window is reading, and it costs what storage costs: searching within the window is cheap, and searching beyond it is not. That difference should be visible rather than hidden, as with any other query (*Three concerns, kept separate*, below). The window is sized in entries as well, and so in bytes.
+- **Curtailment is exact, and recorded.** Dropping the oldest entry frees exactly one slot, so there is no compaction and no surprise that discarding one long line recovered as much room as fifty short ones. Where entries have been discarded, the log says so. A reader must be able to tell "nothing happened then" from "that is no longer here" — a system reasoning from its own history will otherwise conclude the first when the second is true.
+- **An over-length entry is truncated, with a marker, and never rejected.** A log must not fail a write. Losing the tail of one line is better than losing the fact that it happened.
+- **Large content lives outside the log, named by it.** Anything too big for an entry — a long reasoning trace, an image — is written elsewhere and mentioned by path. The log stays skimmable, which is what makes text searching work, and this needs no new mechanism, because a path is just text.
 - **Appending stays cheap.** Space is reclaimed in whole segments rather than line by line, which is also what flash erase blocks want.
+
+**One log.** A system has one history. Nothing in the design needs more yet, and several logs would immediately raise how to search across them and how their limits relate. This is revisitable rather than a constraint; the natural pressure later is one log per subsystem.
 
 **Not in the initial form:** no graph edges, embeddings, tags, similarity or other speculative metadata. Text and a time.
 
@@ -2175,7 +2187,7 @@ Relative views are how temporal patterns around a significant event become visib
 
 **Open:**
 
-- **The limit.** Whether it is expressed in bytes, in entries, or as a time span — though a span cannot bound size unless the rate is bounded too. Whether a system has one log or several, each with its own limit. And whether anything is summarised on the way out, or simply dropped.
+- **What happens on the way out.** Whether anything is summarised as it is discarded, or entries simply vanish.
 - **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
 - **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
 - **Power failure.** What happens to the unflushed tail, and how a partially written entry is recognised when the log is next opened.
@@ -2804,7 +2816,7 @@ Open research and design:
 - ordering pursuits by importance when they contend, and whether starvation needs an answer (§34.3);
 - how concurrent computation is expressed, and how its results return to the authority (§34.3);
 - authority domains: how they are declared, when a pursuit's domains are known, and how they are acquired without deadlock (§34.3);
-- the historical log: what its limit is expressed in, one log or several, what a power failure costs, entry identity for later metadata, and how it is searched (§34.4);
+- the historical log: whether anything is summarised as it is discarded, what a power failure costs, entry identity for later metadata, and how it is searched (§34.4);
 - whether PROACTION gets dynamically sized arrays, and the bounded heap RV-9 would have to grow for them (§34.4);
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
 - long-term memory and context representation;
