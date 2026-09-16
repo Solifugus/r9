@@ -238,7 +238,7 @@ record
 type[n]   // fixed-size arrays
 ```
 
-Large dynamic runtime structures are not required for the REALTIME layer. PROACTION will need them (§34.3); this section describes what REALTIME and REACTION rely on.
+Large dynamic runtime structures are not required for the REALTIME layer. PROACTION will need them (§34.4); this section describes what REALTIME and REACTION rely on.
 
 Hard real-time code should avoid constructs that require unpredictable allocation or execution time.
 
@@ -746,6 +746,25 @@ R9 should distinguish three kinds of bound:
 
 The generated resource contract must not present a declared or observed value as a statically established guarantee. RV-9 can admit work against a timing claim, measure reality, and report or fault when execution violates it.
 
+## 14.1 Properties Travel Through the Call Graph
+
+**Settled in principle; the inference is an implementation question.**
+
+Several restrictions in this document are stated about a construct:
+
+- an admitted REALTIME path may use only operations RV-9 marks bounded and real-time safe (§16.1);
+- a `failsafe` may not allocate, wait, or call arbitrary functions (§15);
+- a `require` is evaluated while planning, so it may not have effects (§25.1);
+- a watch body may not fan out (§21, §25.2).
+
+A restriction on a construct is worthless if a function call can carry that construct past it. Each restriction is therefore a property of a *function*, and the compiler propagates it through the call graph. A function that contains `in parallel`, or reaches one through anything it calls, carries that property, and a context that forbids it rejects the call.
+
+R9 can do this. A program is compiled as a bundle, and the layers where these restrictions apply have no closures, no reflection and no arbitrary indirection, so the call graph is knowable.
+
+- **Inference rather than declaration** keeps the vocabulary small. Nothing is annotated, and the compiler works it out.
+- **The diagnostic matters as much as the check.** An error must name the call path that reached the offending construct, not merely the function that was called.
+- **Open:** whether some properties should also be declarable, for separate compilation or for a library whose source is absent; and what indirect calls would mean, if R9 ever gains them.
+
 ---
 
 # 15. Real-Time Failure and Termination
@@ -1099,7 +1118,7 @@ Exact input syntax remains an implementation detail, but the boundary is importa
 
 **Provisional:** an input may declare the value a component uses until the input is first written, as in `input enabled = false`. A component is then never left acting on an input nobody has set. Before that first write, the input's cell has never been published (§18.1).
 
-Inputs are written by REACTION. PROACTION does not write them, even when it runs on the same machine (§31.1).
+Inputs are written by REACTION. PROACTION does not write them, even when it runs on the same machine (§31.2).
 
 ---
 
@@ -1128,7 +1147,7 @@ await
 within
 ```
 
-Transitions take one refining word, `require` (§25.1), and `watch` can also handle silence (§21.1).
+Transitions take one refining word, `require` (§25.1), and two block forms for ordering work, `in sequence` and `in parallel` (§25.2). `watch` can also handle silence (§21.1).
 
 There is currently **no separate reactive event subsystem**. Hardware events may still act as release sources for real-time components.
 
@@ -1188,6 +1207,8 @@ This enables efficient behavior:
 - short-circuit work when dependencies did not change.
 
 This matches the design principle of doing more with less.
+
+**A watch body is a reflex.** It observes and responds. It is not where work is orchestrated, and it may not use `in parallel`, either directly or through anything it calls (§14.1, §25.2). Where a response genuinely needs concurrency, that belongs in the transition the watch requests, where safe preemption points and failure are already defined (§31.4).
 
 ## 21.1 Silence
 
@@ -1296,7 +1317,7 @@ end
 
 The compiler checks a tolerance's dimension like any other quantity. A dedicated spelling might prove clearer, whether a `near(value, target, tolerance)` function or a tolerance attached to the comparison itself. That choice is open.
 
-This matters more in R9 than in most languages. Planning, preemption and recovery all reevaluate the actual physical state (§31.3), so a predicate that can never quite be satisfied would break all three.
+This matters more in R9 than in most languages. Planning, preemption and recovery all reevaluate the actual physical state (§31.4), so a predicate that can never quite be satisfied would break all three.
 
 **Open:**
 
@@ -1467,6 +1488,64 @@ A requirement also differs from a source state. `STOPPED` says what the world mu
 
 **Diagnosis.** Because requirements are kept separate from the graph, a failure can say which requirement mattered. Suppose a path exists in the graph, but every such path is blocked by some requirement. The attempt then fails with `PRECONDITION_FAILED` rather than `NO_PATH`, and it carries the blocking requirements (§29).
 
+## 25.2 Ordering Work: `in sequence` and `in parallel`
+
+**Provisional.**
+
+Statements in a transition body run one after another. Many physical transformations are not like that. A karate move, a boxing combination, or a machine that raises an arm while it drives is several things happening at once, which together are one transformation from one state to another. That is a transition, and its body needs to be able to say so.
+
+```text
+transition AT(DOCK) -> LOADED
+
+    in parallel
+
+        in sequence
+            ARM.target = BIN
+            await ARM.at_target within 10s
+            else
+                fault ARM_TIMEOUT
+            end
+            GRIPPER.close = true
+        end
+
+        in sequence
+            CONVEYOR.speed = 0.2m/s
+            await CONVEYOR.ready within 8s
+            else
+                fault CONVEYOR_TIMEOUT
+            end
+        end
+
+    end
+
+end
+```
+
+Blocks nest, so a branch may contain either kind. `in sequence` is what a body already does, and it earns its place mainly by grouping the steps of one branch inside `in parallel`.
+
+**Concurrency is allowed where it is unambiguous.** The branches of an `in parallel` must not interfere:
+
+- no two branches write the same input;
+- no branch reads what another branch writes.
+
+The compiler checks this from dependency information it already has (§17, §15.6). Overlapping writes are an error at compile time, not a race to be found later. Where branches are non-interfering, every possible interleaving produces the same result, so this concurrency costs nothing in determinism. Synchronous languages have long relied on the same argument.
+
+**Completion and failure:**
+
+- the block completes when every branch has completed;
+- a `fault` in any branch stops the other branches at their next safe preemption point (§31.4) and ends the block with that reason. Otherwise a hazard is easy to build, with one branch failed while another keeps driving the machine;
+- worst-case preemption latency for the block is the longest stretch between safe points in any of its branches.
+
+**Branches need not be threads.** A branch runs until it reaches an `await`, which is both where it waits and where it is safe to leave it. A supervisor can therefore interleave every branch of a body within one process, with no locks and no extra stacks. On a board with kilobytes to spare, that matters.
+
+**This is concurrency of intent, not synchronized motion.** `in parallel` says two things are under way at once. It does not make them finish together. Motions that must be coordinated in time, such as two arms arriving at the same instant, belong to a REALTIME component that commands them, or to a state parameterized by time (§23.2).
+
+**Still to be refined:**
+
+- whether a form that completes when the *first* branch completes is needed, or whether `await A or B` covers it;
+- whether a branch may request a transition, and whether the rule is then the same non-interference test applied to whole transitions (§31.3);
+- what interference means when one branch affects another through a component's physical behavior rather than through an input.
+
 ---
 
 # 26. Transition Requests
@@ -1497,7 +1576,7 @@ MOVING -> STOPPED -> PARKED -> SAFE
 
 and execute those transformations.
 
-A request for a parameterized state supplies its arguments, as in `transition AT(DOCK_1)` (§23.2). Who made a request matters when two requests conflict (§31.2).
+A request for a parameterized state supplies its arguments, as in `transition AT(DOCK_1)` (§23.2). Who made a request matters when two requests conflict (§31.3).
 
 ---
 
@@ -1607,7 +1686,7 @@ Failure reasons:
 | `TIMEOUT` | reserved for an attempt that exceeds a bound it was given; a body that names its own fault reports that name instead (§15.2) |
 | `COMPONENT_FAILED` | a component the attempt depends on has faulted (§15.5, §15.6) |
 | `CONSTRAINT_VIOLATION` | reserved; the constraint mechanism it would report is not yet designed |
-| `PREEMPTED` | the attempt was superseded by higher-authority behavior (§31.2) |
+| `PREEMPTED` | the attempt was superseded by higher-authority behavior (§31.3) |
 
 A programmed `fault NAME` in a transition body reports `NAME` (§15.2).
 
@@ -1732,7 +1811,33 @@ PROACTION may then:
 
 This keeps deterministic machinery deterministic, and keeps the decision about what to pursue where it belongs.
 
-## 31.1 Authority
+## 31.1 Why REACTION and PROACTION Are Separate
+
+**Settled.**
+
+Both layers plan, so planning is not what divides them. Three things do, and they are one thing seen from three sides.
+
+**Provability.** REACTION is a closed world: a finite compiled graph, predicates over declared publications, and a search that terminates. Everything §33 hopes to prove rests on that closure. PROACTION is an open world of unbounded knowledge, learning, heuristics, and services outside the machine. It can be observed but not proven. The boundary between the two layers is the boundary of static analysis.
+
+**Authority follows provability.** REACTION can hold authority because its behavior can be established before it runs. PROACTION cannot, so it proposes (§31.2). Merged, there would be no layer through which a learned or remote suggestion has to pass.
+
+**Survivability.** REACTION is bounded in time and memory, and it must keep working while PROACTION is deliberating, waiting on a remote service, out of memory, or dead. That calls for separate processes, separate memory classes and separate failure, which RV-9 provides.
+
+A test for where something belongs:
+
+- Can it be checked statically, bounded, and made to terminate? Then REACTION.
+- Does it need knowledge beyond the current publications, or uncertainty, or learning? Then PROACTION.
+- Must it still work when everything above it is gone? Then REACTION or REALTIME.
+
+**The sharpest single difference is memory of progress.**
+
+> REACTION knows only what reality shows. PROACTION knows what it has been through.
+
+REACTION does hold a position within a running transition body, but that progress is always discardable: preemption throws it away and plans again from observed reality (§31.4). PROACTION's memory is the opposite. It is authoritative, it is consulted, and it should survive a restart. A sequence of objectives, whose progress is remembered rather than observed, is therefore PROACTION's kind of thing (§34.3).
+
+§37's crystallization needs this seam as well: behavior can move downward only if there are two layers between which to move.
+
+## 31.2 Authority
 
 **Settled.**
 
@@ -1750,21 +1855,21 @@ PROACTION
 
 RV-9 can enforce much of this with mechanisms it already has. A cell has exactly one writer (§18.1), so a PROACTION process cannot write an input cell that REACTION owns. Exclusive device ownership (§16.1) means it cannot take an actuator a component holds. Whether PROACTION may own devices of its own, such as a camera, a radio or storage, is open. For sensing, communication and memory it almost certainly must.
 
-## 31.2 Arbitration
+## 31.3 Arbitration
 
 **Settled:** the ordering above, and these consequences of it.
 
-- A REACTION request supersedes a running attempt that PROACTION started. The superseded attempt ends `FAILED` with reason `PREEMPTED`, at its next safe preemption point (§31.3).
+- A REACTION request supersedes a running attempt that PROACTION started. The superseded attempt ends `FAILED` with reason `PREEMPTED`, at its next safe preemption point (§31.4).
 - A PROACTION request made while a REACTION attempt is running fails with `PREEMPTED`, without being planned.
 - A REACTION response that must *continue* to hold is expressed with `require`, not with a lock. Suppose REACTION has reached `SAFE` because the battery is critical. PROACTION may then ask for something else. But while every transition out of `SAFE` requires enough charge, no eligible edge exists, so the request fails with `PRECONDITION_FAILED` and names the requirement (§29). PROACTION cannot override the safety response, and it learns exactly why.
 
 **Provisional:**
 
-- Until parallel transition execution is designed (§42), one attempt runs at a time.
+- Until whole transitions may run in parallel (§42), one attempt runs at a time. Concurrency *within* a single transition body is a separate matter, and is allowed wherever it is unambiguous (§25.2).
 - A request for the state an attempt is already pursuing, with the same arguments and from the same authority, does not supersede that attempt; it refers to it. Without this rule, a `watch` that requests `SAFE` on every publication would keep restarting its own attempt.
 - Between two REACTION requests, the later supersedes the earlier, and the earlier is reported `PREEMPTED`. Two things are open: whether REACTION requests need an order among themselves, and whether supersession at equal authority deserves a reason of its own.
 
-## 31.3 Safe Preemption Points
+## 31.4 Safe Preemption Points
 
 A superseded attempt cannot simply stop wherever it happens to be. A transition body issues commands to the physical world, and some sequences of commands are safe only as a whole:
 
@@ -1887,7 +1992,7 @@ PROACTION is the layer that decides what should happen next, including acting on
 
 - **PROACTION is part of R9, and it runs on the system.** R9 is for genuinely autonomous machines. An R9 system must be capable of autonomous operation without depending on any external intelligence service.
 - **External services are resources, not the layer.** LLMs, databases, other agents, remote computers and human operators may be available to PROACTION, and it should be able to use them well. None is required. None holds authority that PROACTION itself does not have.
-- **PROACTION proposes; the layers below retain authority** (§31.1). It acts on the physical world by requesting states and observing results, even when it runs on board.
+- **PROACTION proposes; the layers below retain authority** (§31.2). It acts on the physical world by requesting states and observing results, even when it runs on board.
 - **PROACTION plans above the transition planner, not within it.** REACTION's planner answers whether a known state is reachable. PROACTION decides which states to pursue, in what order and for what reason, and what to do when REACTION says no.
 - **PROACTION will be substantially more dynamic than the layers below.** The restrictions of §4 and §14 exist to make REALTIME timing trustworthy. They are not goals for PROACTION.
 
@@ -1900,9 +2005,63 @@ PROACTION is the layer that decides what should happen next, including acting on
 - deliberation, and planning above the deterministic transition planner;
 - memory, and the use of accumulated knowledge and history;
 - learning or adaptation where appropriate (§37 limits how learning reaches the layers below);
-- communication with outside systems (§34.4).
+- communication with outside systems (§34.5).
 
-## 34.3 Data: Research Directions
+## 34.3 Pursuit: One Serial Process
+
+**Settled in principle; the mechanisms are provisional.**
+
+A machine is one machine. Whatever else PROACTION becomes, it has **one locus of intent**: a single serial process that decides what the machine is doing. Several pursuits may be under way, but one decision is made at a time.
+
+What that buys:
+
+- **One writer.** As with a publication cell (§18.1), a single writer over PROACTION's knowledge gives coherence without locking.
+- **Contention stops being arbitration.** With one deciding process, order is simply the order in which that process reaches each request.
+- **Deliberation is replayable.** A single serial order of events can be logged and replayed, which is what debugging autonomy and learning from history both need.
+- **Restart is defined.** If the process dies, REACTION keeps the machine safe, and what was being pursued is in the store.
+
+### `in parallel` here is interleaving
+
+PROACTION uses the same two block forms as REACTION (§25.2), with the meaning this layer gives them. Within one serial process, branches do not run simultaneously. They advance at defined points, and the process takes up the next one. The interleaving is deterministic and reproducible, and it costs one process rather than a thread for each branch.
+
+What differs from REACTION is that PROACTION's branches compete for one machine. Two pursuits cannot both drive it. So `in parallel` here means concurrent *pursuit*, not concurrent execution.
+
+### Contention is a queue, and losing is a result
+
+When two branches want the machine:
+
+- first come, first served, where "first" means position in the single serial order;
+- the winner holds the machine until its attempt ends;
+- a branch willing to wait takes its place in line, and `within` says how long it is willing to wait;
+- losing, or waiting too long, produces an ordinary attempt result (§29) and never an error. Nothing unwinds. Deciding what to do about a result is what PROACTION is for.
+
+A branch holds at most one thing, the machine, so there is no hold-and-wait and no deadlock.
+
+**Open:** starvation is possible, because a branch that always arrives second always loses. Safety does not depend on it, since REACTION outranks every pursuit. Ordering pursuits by importance — value, urgency, drive, whatever it is eventually called — is a PROACTION matter and is not designed.
+
+### Decision points
+
+Each layer has a recurring boundary. REALTIME has its period, REACTION has `await` and transition boundaries, and PROACTION has **decision points**, where the serial process takes up what has arrived and may change course.
+
+A pursuit may not run arbitrarily far without reaching one, so responsiveness has a bound even though deliberation does not. Redirection then has a clean meaning: something can make a pursuit stale, and the process reconsiders at its next decision point rather than being interrupted mid-thought.
+
+**A serial process must not block.** A remote model, a database query, a long retrieval or a transition attempt is issued, and then taken up as an event at a decision point. Serial and blocking would make the machine hostage to the slowest thing it asked for.
+
+### Watchers that inform
+
+A `watch` in REACTION acts. It can request a transition immediately, because it is a bounded, provable reflex (§21).
+
+A watcher belonging to PROACTION does not take control. It observes, records what it noticed, and may mark that as worth attention. The serial process decides what to do about it at its next decision point. This is how one locus of intent survives things happening at unpredictable times.
+
+### Idleness is a condition to watch
+
+A system pursuing nothing is safe, because REACTION does not depend on PROACTION. But it is not autonomous. "Nothing is being pursued" should therefore be an observable condition with a declared fallback: reassess, return to a dock, recharge. This is §30's shape applied to intent — make the absence observable, and respond to it. The form is open.
+
+### Several subsystems, and several machines
+
+Only the deciding is single. An arm and a base may be pursued in separate branches. Several machines are several PROACTIONs, each with its own locus of intent, cooperating through the interfaces of §34.5.
+
+## 34.4 Data: Research Directions
 
 **Open research.** Nothing in this subsection is a settled language feature or syntax.
 
@@ -1976,7 +2135,7 @@ We do not yet know whether `graph` should be a first-class type, a way of organi
 - **Memory classes and budgets** (RV-9 `docs/design.md` §35). When ordinary work exhausts memory, the result is a refusal, not a failure of control. That is what lets PROACTION be dynamic without endangering REALTIME.
 - **Storage.** There is a flash filesystem (`/f0`) and a RAM disk (`/r0`), and an SD card (`/sd0`) is planned. Any persistent collection kept on flash must respect flash wear.
 
-## 34.4 Interfaces
+## 34.5 Interfaces
 
 ### PROACTION to REACTION
 
@@ -2001,7 +2160,7 @@ The same description would serve PROACTION on the machine and any outside system
 
 **Provisional:** losing a link is published state, like any other failure (§22). Whatever terminates the link can turn absence into a value, for example by publishing that a peer's lease has lapsed, and REACTION responds with `watch`.
 
-## 34.5 Targets, and the Link
+## 34.6 Targets, and the Link
 
 **R9 is meant to span autonomous-system targets.** RV-9 on the ESP32-C5 is an important first platform and proving ground. It is not the size PROACTION must fit.
 
@@ -2012,7 +2171,7 @@ On that board as configured today, RV-9 measures (RV-9 `docs/design.md` §35):
 - a default memory budget of 32 KB for each process tree;
 - no dynamic allocation in modules at all.
 
-PROACTION as §34.2 and §34.3 describe it will not fit there as the board is presently configured. That is a fact about the first target, not a limit on the design. Plausible arrangements include a larger RV-9 target, or REALTIME and REACTION on the C5 with PROACTION on a companion system. Whichever is used, the authority boundary is the same.
+PROACTION as §34.2 and §34.4 describe it will not fit there as the board is presently configured. That is a fact about the first target, not a limit on the design. Plausible arrangements include a larger RV-9 target, or REALTIME and REACTION on the C5 with PROACTION on a companion system. Whichever is used, the authority boundary is the same.
 
 When any part of PROACTION, or anything it talks to, is off the board, the link is a **joint R9/RV-9 design problem**. No protocol is chosen. What is known:
 
@@ -2179,13 +2338,22 @@ watch
 state
 transition
 require
+in sequence
+in parallel
 ```
 
 `watch` also takes `within ... else` for silence (§21.1, provisional). States may take parameters (§23.2, provisional).
 
 ## PROACTION
 
-No vocabulary yet, deliberately (§34).
+Only the two block forms, with the meaning §34.3 gives them:
+
+```text
+in sequence
+in parallel
+```
+
+Nothing else yet, deliberately (§34).
 
 This is intentionally tiny.
 
@@ -2215,7 +2383,9 @@ priority
 
 Some may eventually exist in lower-level runtime libraries or the future proof system, but none is currently needed as a central language abstraction. `priority` was replaced by `placement` (§13.1). Silence is handled by `watch ... within`, not by an event (§21.1).
 
-PROACTION's needs (§34.3) will test this list hardest. Additions made for it should still meet the rule below.
+PROACTION's needs (§34.4) will test this list hardest. Additions made for it should still meet the rule below.
+
+`in sequence` and `in parallel` (§25.2) are not threads. They are scoped, joined where they are written, and checked for non-interference, which is why `thread`, `lock` and `mutex` remain absent.
 
 The design should resist vocabulary growth unless a concrete problem cannot be expressed cleanly with existing constructs.
 
@@ -2296,7 +2466,7 @@ end
 
 
 # MOVING and STOPPED between them cover every reality,
-# so a plan always has somewhere to start (§31.3).
+# so a plan always has somewhere to start (§31.4).
 
 state MOVING
     abs(DRIVE.speed) >= STILL
@@ -2397,7 +2567,7 @@ What the example shows:
 - **Preconditions with reasons.** Until charge is back above `MIN_CHARGE`, a new request for any `AT(…)` fails `PRECONDITION_FAILED` and names `BATTERY.charge > MIN_CHARGE`. A request for `AT(9m)` fails at any charge and names the track limit.
 - **Silence.** If `BATTERY` stops publishing for a second, the `else` path requests `SAFE`.
 - **Component faults.** If `DRIVE` or `BRAKE` faults, RV-9 applies its failsafe, and the fault is published in the component's cell (§15). A transition awaiting that component fails `COMPONENT_FAILED`.
-- **Order of commands.** Every hand-over between brake and drive is ordered so that something always holds the cart, and each hand-over is separated by an `await`. That makes every point where preemption can happen safe (§31.3).
+- **Order of commands.** Every hand-over between brake and drive is ordered so that something always holds the cart, and each hand-over is separated by an `await`. That makes every point where preemption can happen safe (§31.4).
 
 Whatever PROACTION becomes, it would reach this machine only by requesting states such as `AT(3.2m)` and observing the published values and attempt results.
 
@@ -2465,6 +2635,10 @@ Planning, preemption and recovery start from what published values show now, nev
 
 An R9 system must be able to act autonomously by itself. External intelligence is a resource it may use, not a dependency.
 
+### 15. One machine, one locus of intent
+
+Work may proceed concurrently wherever it is unambiguous, but a single serial process decides what the machine is doing (§34.3).
+
 ---
 
 # 42. Open Questions
@@ -2502,16 +2676,18 @@ Provisional syntax and semantics that still need refinement:
 - parameterized states: declared or inferred parameter types, and whether parameterized states may be transition sources or intermediate steps (§23.2);
 - `require`: where it may appear, and whether a requirement found false during execution fails the attempt or replans (§25.1);
 - the exact semantics of `watch ... within ... else` (§21.1);
-- arbitration among REACTION requests, and whether supersession at equal authority needs its own reason (§31.2);
-- safe preemption points beyond transition boundaries and `await`, and whether consecutive input writes publish as one set (§31.3);
-- the representation of attempt diagnostics (§29).
+- arbitration among REACTION requests, and whether supersession at equal authority needs its own reason (§31.3);
+- safe preemption points beyond transition boundaries and `await`, and whether consecutive input writes publish as one set (§31.4);
+- the representation of attempt diagnostics (§29);
+- `in parallel`: whether a first-to-complete form is needed, whether a branch may request a transition, and what interference through a component rather than an input means (§25.2);
+- how far property inference through the call graph should reach, and whether properties should also be declarable (§14.1).
 
 Implementation questions:
 
 - exact internal transition-planning algorithm;
 - how overlapping predicates/states are represented;
 - whether planner cost is ever needed;
-- whether transition execution may be parallelized;
+- whether whole transitions may execute in parallel, beyond the concurrency within one body that §25.2 allows;
 - how planner cycles and impossible goals are diagnosed;
 - exact lifetime and scoping rules for transition result objects.
 
@@ -2520,12 +2696,14 @@ Implementation questions:
 Open research and design:
 
 - its execution model, and what grammar it needs at all;
-- rich, persistent and larger-than-memory data, queries and indexes, and the status of `graph` (§34.3);
-- the machine-readable boundary between PROACTION and REACTION, and which states may be requested (§34.4);
-- mechanisms for communicating with outside systems, and the transport for any off-board link (§34.4, §34.5);
-- how PROACTION is given memory on RV-9, and which targets it runs on (§34.3, §34.5);
+- rich, persistent and larger-than-memory data, queries and indexes, and the status of `graph` (§34.4);
+- the machine-readable boundary between PROACTION and REACTION, and which states may be requested (§34.5);
+- mechanisms for communicating with outside systems, and the transport for any off-board link (§34.5, §34.6);
+- how PROACTION is given memory on RV-9, and which targets it runs on (§34.4, §34.6);
 - learning and adaptation: what may change at runtime, and the path by which stable behavior becomes REACTION source (§37);
 - uncertainty and probabilistic reasoning;
+- ordering pursuits by importance when they contend, and whether starvation needs an answer (§34.3);
+- what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
 
@@ -2565,13 +2743,15 @@ watch
 state
 transition
 require
+in sequence
+in parallel
 ```
 
-It observes published reality, including silence where a publication was expected. It uses known transformations to move the system toward declaratively defined states, which may be parameterized. A transition is eligible only while its requirements hold. REACTION outranks PROACTION, and planning after preemption starts from newly observed reality.
+It observes published reality, including silence where a publication was expected. Within a transition, work may proceed concurrently wherever the compiler can show the branches do not interfere. It uses known transformations to move the system toward declaratively defined states, which may be parameterized. A transition is eligible only while its requirements hold. REACTION outranks PROACTION, and planning after preemption starts from newly observed reality.
 
 ### PROACTION
 
-PROACTION has no syntax yet. It decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results.
+PROACTION decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results. It is one serial process — one locus of intent — within which several pursuits may be interleaved, and its memory of what it has been through is what REACTION deliberately lacks. Beyond the two block forms it has no syntax yet.
 
 The next major design question is PROACTION's execution model, and in particular how to:
 
