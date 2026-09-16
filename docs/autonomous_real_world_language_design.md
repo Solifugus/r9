@@ -2148,11 +2148,11 @@ A machine that decides what to do next needs to remember what happened. The init
 
 > **A log is timestamped lines of text.**
 
-An entry is **bounded text with attributes**. The text is what a program writes. The attributes are what the store knows about it, beginning with exactly one:
+An entry is **bounded text with attributes**. The text is what a program writes. The attributes are what is known about it, beginning with exactly one:
 
-- **`time`** — when the entry was made.
+- **`time`** — when the entry was made, assigned by the store.
 
-Later revisions will add more. The text is content, and the attributes are not part of it: the store assigns them, so they cannot be forged by writing a line. That division is the same one §34.5 relies on.
+Later revisions will add more. The text is content, and the attributes are not part of it. An attribute the store assigns cannot be forged by writing a line, which is the division §34.5 relies on. An attribute a *writer* supplies is a claim rather than knowledge, and the two must not read alike — see *Anchored attributes*, and the open question below.
 
 Entries can be viewed and searched with absolute times, or as durations relative to a chosen entry or instant:
 
@@ -2172,6 +2172,21 @@ Two properties keep it honest:
 - **Whatever a projection shows, text search can match.** Attributes rendered into a view are text like any other, so `grep`-style searching reaches them, and metadata needs no second, structured query language of its own.
 - **Attributes are also reachable as fields.** An entry read by a program is an ordinary record — `entry.text`, `entry.time` — so nothing has to parse back what it just rendered.
 
+**Anchored attributes.** *Provisional.* A value often belongs in the text and in an attribute at once. "wheel slip 0.42" should read as a sentence and be reachable as a number:
+
+```text
+traction lost, wheel slip 0.42, motor current 6.1A
+                         ^^^^                ^^^^
+```
+
+An attribute may therefore be **anchored** to a span of the entry's text. This is stand-off annotation, as corpora, source maps and editor text properties have long done it, and it lets each half do what it is good at:
+
+- **The text stays canonical.** The entry is stored exactly as written, so text search sees the line it expects, and the length bound stays exact.
+- **The attribute is a typed view of that span.** The store validates at write time that the span parses as the declared type, so the text and the attribute cannot disagree. For `6.1A` that includes the unit, which brings dimensional analysis (§5) to the text boundary: the attribute is a current, and adding it to a voltage is still an error.
+- **A projection may re-render a span from its attribute** — `0.42` shown as `42%`, a current at a different precision — without the stored text changing. So an entry can be read as text, as values, or as text with its values reformatted.
+
+Initially **spans may not overlap.** Nesting and overlap are where stand-off annotation becomes complicated, and nothing here needs them yet.
+
 **Bounded, and curtailed automatically.** Memory is not eternal. A log that grows forever is a fault waiting to happen, so a log is a **FIFO with a declared limit**: when it is full, the oldest entries go. Losing them is ordinary operation, never an error.
 
 **The limit is a number of entries, with a declared maximum entry length.** Entries are what a program thinks in — the last ten thousand things that happened. A count alone bounds nothing, though, since ten thousand lines may be 400 KB or 40 MB. Declaring the longest an entry may be makes the count a real bound:
@@ -2184,7 +2199,7 @@ That number is known before the program runs, which puts a log where every other
 
 - **A window in RAM over a larger log in storage.** What is held in memory is a bounded window. The log itself may be far larger, on flash, an SD card or a disk. Moving the window is reading, and it costs what storage costs: searching within the window is cheap, and searching beyond it is not. That difference should be visible rather than hidden, as with any other query (*Three concerns, kept separate*, below). The window is sized in entries as well, and so in bytes.
 - **Curtailment is exact, and recorded.** Dropping the oldest entry frees exactly one slot, so there is no compaction and no surprise that discarding one long line recovered as much room as fifty short ones. Where entries have been discarded, the log says so. A reader must be able to tell "nothing happened then" from "that is no longer here" — a system reasoning from its own history will otherwise conclude the first when the second is true.
-- **An over-length entry is truncated, with a marker, and never rejected.** A log must not fail a write. Losing the tail of one line is better than losing the fact that it happened.
+- **An over-length entry is truncated, with a marker, and never rejected.** A log must not fail a write. Losing the tail of one line is better than losing the fact that it happened. An attribute anchored beyond the cut has nothing left to point at, so it is dropped, and the marker makes clear that something was.
 - **Large content lives outside the log, named by it.** Anything too big for an entry — a long reasoning trace, an image — is written elsewhere and mentioned by path. The log stays skimmable, which is what makes text searching work, and this needs no new mechanism, because a path is just text.
 - **Appending stays cheap.** Space is reclaimed in whole segments rather than line by line, which is also what flash erase blocks want.
 
@@ -2200,8 +2215,8 @@ That number is known before the program runs, which puts a log where every other
 
 - **What happens on the way out.** Whether anything is summarised as it is discarded, or entries simply vanish.
 - **How a projection is written.** Whether it is a list of attributes, a format, or a query, and how the reference point of a relative view is named.
-- **What search matches.** The rendered projection, or the stored text together with predicates over attributes, or both.
-- **Where an attribute comes from.** Every attribute so far is assigned by the store and therefore trustworthy. Should a program later attach its own, the log needs the distinction §14 already draws for bounds — established, declared, observed — because a program's claim must never read as the store's knowledge.
+- **What search matches.** The rendered projection, or the stored text together with predicates over attributes, or both. Anchored attributes sharpen the question: the stored text may hold `0.42` where the projection shows `42%`. Matching what the reader is looking at is the likelier answer.
+- **Attribute origin — a decision to be made.** `time` is assigned by the store and is therefore trustworthy. An anchored value is supplied by whoever wrote the line. Validating the span catches a value that contradicts its own text, but not one written wrongly in both places. Attributes should therefore carry their origin, and a reader must be able to tell the store's knowledge from a writer's claim, as §14 already distinguishes established, declared and observed bounds. Whether a projection shows origin by default, and whether a program may anchor attributes at all in the first revision, is not settled.
 - **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
 - **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
 - **Power failure.** What happens to the unflushed tail, and how a partially written entry is recognised when the log is next opened.
