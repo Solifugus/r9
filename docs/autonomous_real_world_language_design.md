@@ -1995,6 +1995,7 @@ PROACTION is the layer that decides what should happen next, including acting on
 - **PROACTION proposes; the layers below retain authority** (§31.2). It acts on the physical world by requesting states and observing results, even when it runs on board.
 - **PROACTION plans above the transition planner, not within it.** REACTION's planner answers whether a known state is reachable. PROACTION decides which states to pursue, in what order and for what reason, and what to do when REACTION says no.
 - **PROACTION will be substantially more dynamic than the layers below.** The restrictions of §4 and §14 exist to make REALTIME timing trustworthy. They are not goals for PROACTION.
+- **PROACTION encodes no theory of intelligence.** R9 should support simple rule-based autonomy, search and planning systems, learned systems, LLM-assisted agents, Conatus-like architectures (§35), and shapes nobody has thought of yet. The language supplies primitives for building autonomous systems. It does not define what an autonomous mind must be.
 
 ## 34.2 What PROACTION Must Eventually Do
 
@@ -2007,51 +2008,85 @@ PROACTION is the layer that decides what should happen next, including acting on
 - learning or adaptation where appropriate (§37 limits how learning reaches the layers below);
 - communication with outside systems (§34.5).
 
-## 34.3 Pursuit: One Serial Process
+## 34.3 Pursuit: Serialized Authority
 
 **Settled in principle; the mechanisms are provisional.**
 
-A machine is one machine. Whatever else PROACTION becomes, it has **one locus of intent**: a single serial process that decides what the machine is doing. Several pursuits may be under way, but one decision is made at a time.
+Whatever else PROACTION becomes, it has **one serialized authority**: a single point that commits decisions, changes authoritative PROACTION state, and asks REACTION for states. The computation that supports those decisions need not be serial.
 
-What that buys:
+> **Serialize authority, not intelligence.**
 
-- **One writer.** As with a publication cell (§18.1), a single writer over PROACTION's knowledge gives coherence without locking.
-- **Contention stops being arbitration.** With one deciding process, order is simply the order in which that process reaches each request.
-- **Deliberation is replayable.** A single serial order of events can be logged and replayed, which is what debugging autonomy and learning from history both need.
-- **Restart is defined.** If the process dies, REACTION keeps the machine safe, and what was being pursued is in the store.
+Vision analysis, route search, memory retrieval, consulting a remote model, predicting what the battery will do: any of these may run concurrently, on another core, an accelerator, or another machine. Their results return to the serialized authority, which decides what to accept, what to change, and what to ask for.
 
-### `in parallel` here is interleaving
+A single serial process is a reasonable first implementation, and on RV-9 it is the obvious one. It is not the architecture.
 
-PROACTION uses the same two block forms as REACTION (§25.2), with the meaning this layer gives them. Within one serial process, branches do not run simultaneously. They advance at defined points, and the process takes up the next one. The interleaving is deterministic and reproducible, and it costs one process rather than a thread for each branch.
+What serializing authority buys:
 
-What differs from REACTION is that PROACTION's branches compete for one machine. Two pursuits cannot both drive it. So `in parallel` here means concurrent *pursuit*, not concurrent execution.
+- **One writer.** As with a publication cell (§18.1), a single writer over authoritative PROACTION state gives coherence without locking.
+- **Order is decided, not raced.** Contention is settled by the order in which the authority commits, not by which computation happened to finish first.
+- **Deliberation stays replayable.** What has to be recorded is the order in which results were accepted and decisions committed, not the internal progress of every computation. Concurrency costs nothing in reproducibility. An unrecorded commit order would cost all of it.
+- **Restart is defined.** If PROACTION stops, REACTION keeps the machine safe, and what was being pursued is in the store.
+
+### Computation has no authority
+
+What makes this concurrency safe is the rule that already governs the layers, applied within one: **what computes does not commit.**
+
+- A computation returns a result. It does not change authoritative state, and it does not request transitions.
+- A result may arrive too late to matter, so the authority must be free to discard it, and anything started must be abandonable.
+- A computation that fails, times out or is cancelled produces a result saying so. It does not fault the authority.
+
+**Open:** how concurrent computation is expressed at all — whether `in parallel` branches carry it, whether it is requested and taken up like an attempt, and how a computation says what it needs. None of that is designed. On RV-9 the obvious shape needs no new mechanism: a separate process, with its own memory budget, publishing into a cell the authority watches.
+
+### `in parallel` here is concurrent pursuit
+
+PROACTION uses the same two block forms as REACTION (§25.2), with the meaning this layer gives them. A branch is a pursuit: something being sought, with its own steps and its own waiting.
+
+Whether branches interleave within one process or genuinely run at once is a property of the target, not of the language. What is fixed is that their decisions serialize.
+
+What differs from REACTION is that pursuits may compete for the same part of the machine.
+
+### Authority domains
+
+A complex machine is not one indivisible resource. Driving the base, moving an arm, aiming a camera and talking to an operator are different authorities, and independent pursuits may legitimately direct different ones at the same time.
+
+The likely abstraction is an **authority domain** — navigation, manipulation, vision, communication, power, and so on — where:
+
+- two pursuits needing the same domain contend;
+- pursuits over independent domains proceed at once.
+
+This is §25.2's rule one level up: concurrency is allowed where it is unambiguous. In REACTION the compiler proves non-interference over inputs. In PROACTION, domains name that same interference coarsely enough to arbitrate pursuits before their plans are known in detail.
+
+**Open, and deliberately unsettled:**
+
+- how a domain is declared, and how it relates to the components and inputs REACTION owns. A domain is presumably a set of those;
+- when a pursuit's domains are known. Which transitions a plan will use is known once it is planned, and replanning may change them;
+- how domains are acquired. If a pursuit can hold one domain while waiting for another, deadlock becomes possible. Taking a whole set at once or not at all, in the manner of RV-9's admission, is the obvious way to keep that impossible;
+- whether REACTION ever needs to take a domain a pursuit holds, given that it already outranks every pursuit (§31.2).
 
 ### Contention is a queue, and losing is a result
 
-When two branches want the machine:
+Where two pursuits do contend:
 
-- first come, first served, where "first" means position in the single serial order;
-- the winner holds the machine until its attempt ends;
-- a branch willing to wait takes its place in line, and `within` says how long it is willing to wait;
-- losing, or waiting too long, produces an ordinary attempt result (§29) and never an error. Nothing unwinds. Deciding what to do about a result is what PROACTION is for.
+- first come, first served, by the order in which the authority reaches each request;
+- the winner keeps what it holds until its attempt ends;
+- a pursuit willing to wait takes its place in line, and `within` says for how long;
+- losing, or waiting too long, produces an ordinary attempt result (§29), never an error. Nothing unwinds. Deciding what to do about a result is what PROACTION is for.
 
-A branch holds at most one thing, the machine, so there is no hold-and-wait and no deadlock.
-
-**Open:** starvation is possible, because a branch that always arrives second always loses. Safety does not depend on it, since REACTION outranks every pursuit. Ordering pursuits by importance — value, urgency, drive, whatever it is eventually called — is a PROACTION matter and is not designed.
+**Open:** starvation is possible, because a pursuit that always arrives second always loses. Safety does not depend on it, since REACTION outranks every pursuit. Ordering pursuits by importance — value, urgency, drive, whatever it comes to be called — is a PROACTION matter, and is not designed.
 
 ### Decision points
 
-Each layer has a recurring boundary. REALTIME has its period, REACTION has `await` and transition boundaries, and PROACTION has **decision points**, where the serial process takes up what has arrived and may change course.
+Each layer has a recurring boundary. REALTIME has its period, REACTION has `await` and transition boundaries, and PROACTION has **decision points**, where the authority takes up what has arrived, results returning from concurrent computation included, and may change course.
 
 A pursuit may not run arbitrarily far without reaching one, so responsiveness has a bound even though deliberation does not. Redirection then has a clean meaning: something can make a pursuit stale, and the process reconsiders at its next decision point rather than being interrupted mid-thought.
 
-**A serial process must not block.** A remote model, a database query, a long retrieval or a transition attempt is issued, and then taken up as an event at a decision point. Serial and blocking would make the machine hostage to the slowest thing it asked for.
+**The authority must not block.** A remote model, a database query, a long retrieval or a transition attempt is issued, and then taken up as an event at a decision point. Serialized and blocking would make the machine hostage to the slowest thing it asked for.
 
 ### Watchers that inform
 
 A `watch` in REACTION acts. It can request a transition immediately, because it is a bounded, provable reflex (§21).
 
-A watcher belonging to PROACTION does not take control. It observes, records what it noticed, and may mark that as worth attention. The serial process decides what to do about it at its next decision point. This is how one locus of intent survives things happening at unpredictable times.
+A watcher belonging to PROACTION does not take control. It observes, records what it noticed, and may mark that as worth attention. The authority decides what to do about it at its next decision point. This is how serialized decision-making survives things happening at unpredictable times.
 
 ### Idleness is a condition to watch
 
@@ -2059,7 +2094,7 @@ A system pursuing nothing is safe, because REACTION does not depend on PROACTION
 
 ### Several subsystems, and several machines
 
-Only the deciding is single. An arm and a base may be pursued in separate branches. Several machines are several PROACTIONs, each with its own locus of intent, cooperating through the interfaces of §34.5.
+Only the committing of decisions is single. An arm and a base may be pursued at once where they are different authority domains, and the computation behind them may run wherever there is capacity for it. Several machines are several PROACTIONs, each with its own serialized authority, cooperating through the interfaces of §34.5.
 
 ## 34.4 Data: Research Directions
 
@@ -2080,6 +2115,61 @@ An intelligent agent works over far more knowledge than a control loop does, and
 - streaming and iteration over data larger than memory;
 - historical data;
 - potentially extensible indexing, such as semantic, vector or other intelligent retrieval.
+
+**These are things some architectures will want, not a list to be implemented.** Only ordinary program data and a historical log are proposed below. Lists, maps, sets, graphs, vector stores and specialised knowledge structures must earn their place through a demonstrated R9 requirement, rather than because agent frameworks commonly have them (§34.1: PROACTION encodes no theory of intelligence).
+
+### Ordinary program data
+
+**Settled in direction; syntax open.**
+
+PROACTION is a general-purpose programming environment, not a log with a program attached. Beyond R9's scalars and physical quantities (§4, §5) it needs at least:
+
+- **records with named attributes**, so related values are grouped and reached by name;
+- **numerically indexed arrays**, including dynamically sized ones where PROACTION needs them.
+
+```text
+observation.temperature
+observation.time
+observation.source
+
+observations[0]
+observations[1]
+```
+
+Declaration and type syntax remain to be designed. Dynamically sized arrays are the first thing in R9 that needs a heap, which RV-9 modules do not have today (see *What RV-9 offers today*, below).
+
+### A historical log
+
+**Settled in direction; the form is deliberately minimal.**
+
+A machine that decides what to do next needs to remember what happened. The initial facility is as small as it can be:
+
+> **A log is timestamped lines of text.**
+
+An entry is textual content with a time. The time is metadata: the store assigns it, and it need not appear in the text. That division is the same one §34.5 relies on — what a writer supplies is content, and what the system stamps is not forgeable by writing text.
+
+Entries can be viewed and searched with absolute times, or as durations relative to a chosen entry or instant:
+
+```text
+-5.904s  Battery voltage dropped
+-3.212s  Motor current increased
+ 0.000s  Traction lost
++0.287s  REACTION entered SAFE
+```
+
+Relative views are how temporal patterns around a significant event become visible, which is exactly what deciding and learning need.
+
+**Not in the initial form:** no graph edges, embeddings, tags, similarity or other speculative metadata. Text and a time.
+
+**But the representation must stay extensible.** A later revision should be able to associate further metadata with entries without altering their text and without invalidating logs already written. That needs stable entry identity to attach anything to, which argues for identity now even though nothing yet uses it.
+
+**Searching should eventually be powerful and composable**, in the spirit of `grep` and `sed`: text matching, filtering, temporal windows and transformations. Which functions, and in what syntax, is open.
+
+**Open:**
+
+- **Retention.** A log grows without bound and flash does not. What rotates, what is summarised, what is thrown away, and who decides.
+- **Which time.** When something was observed and when it was logged are different, and publications already distinguish them (§18.1). Entries about the physical world probably want the observation time.
+- **Cost.** Writing a line must be cheap enough to do often, and searching must be able to use an index rather than reading everything back.
 
 ### Three concerns, kept separate
 
@@ -2635,9 +2725,9 @@ Planning, preemption and recovery start from what published values show now, nev
 
 An R9 system must be able to act autonomously by itself. External intelligence is a resource it may use, not a dependency.
 
-### 15. One machine, one locus of intent
+### 15. Serialize authority, not intelligence
 
-Work may proceed concurrently wherever it is unambiguous, but a single serial process decides what the machine is doing (§34.3).
+Work may proceed concurrently wherever it is unambiguous, and computation wherever there is capacity for it. What is serialized is the committing of decisions and the changing of authoritative state (§34.3).
 
 ---
 
@@ -2703,6 +2793,9 @@ Open research and design:
 - learning and adaptation: what may change at runtime, and the path by which stable behavior becomes REACTION source (§37);
 - uncertainty and probabilistic reasoning;
 - ordering pursuits by importance when they contend, and whether starvation needs an answer (§34.3);
+- how concurrent computation is expressed, and how its results return to the authority (§34.3);
+- authority domains: how they are declared, when a pursuit's domains are known, and how they are acquired without deadlock (§34.3);
+- the historical log: retention on a small target, entry identity for later metadata, and how it is searched (§34.4);
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
@@ -2751,7 +2844,7 @@ It observes published reality, including silence where a publication was expecte
 
 ### PROACTION
 
-PROACTION decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results. It is one serial process — one locus of intent — within which several pursuits may be interleaved, and its memory of what it has been through is what REACTION deliberately lacks. Beyond the two block forms it has no syntax yet.
+PROACTION decides what should happen next, on its own initiative and on the system itself, and it may use external intelligence as an optional resource. It reaches the physical world by requesting states and observing results. Its decisions and its changes to authoritative state pass through one serialized authority, while the computation behind them may run concurrently and several pursuits may proceed at once over independent authority domains. Its memory of what it has been through is what REACTION deliberately lacks. Beyond the two block forms it has no syntax yet.
 
 The next major design question is PROACTION's execution model, and in particular how to:
 
