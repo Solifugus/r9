@@ -641,9 +641,22 @@ cannot override it, and it learns exactly why **(§31.3)**.
 
 ## 11. PROACTION: deciding what to do
 
-PROACTION has **no grammar yet** **(§34)**. What follows is its
-architecture, which is settled, with shapes written as sketches. This is
-the layer to think hardest about while reading.
+PROACTION's grammar is **barely begun** **(§34)**. Three provisional words
+exist — `pursue` names a pursuit, `using` takes an authority domain for the
+length of a block, and `compute` starts work whose result is ordinary
+observable state. Everything else below is architecture, written as
+sketches. This is the layer to think hardest about while reading.
+
+```text
+pursue WATER_WHEN_DRY
+    using IRRIGATION within 10min
+        let a = transition MOIST
+        ...
+    else
+        # another pursuit holds it, and this one would not wait longer
+    end
+end
+```
 
 **One serialized authority.** Decisions and changes to authoritative state
 pass through a single point. The computation behind them — vision, route
@@ -664,6 +677,12 @@ stopped by a refusal; it is informed by one **(§34.3)**.
 **Decision points** are where the authority takes up what has arrived and
 may change course. A pursuit may not run arbitrarily far without reaching
 one, so redirection has a bound. The authority must never block.
+
+**What survives a restart is intent, not position.** REALTIME and REACTION
+remember nothing, because they re-observe reality. PROACTION must remember
+what it was pursuing and what it has learned — but belief is persisted and
+the world never is, and a restored pursuit comes back as intent and replans
+from what is true now **(§34.3)**.
 
 **A PROACTION watcher informs; it does not take control.** Only REACTION
 watchers act directly.

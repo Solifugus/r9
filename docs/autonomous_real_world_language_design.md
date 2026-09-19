@@ -2081,6 +2081,8 @@ Whatever else PROACTION becomes, it has **one serialized authority**: a single p
 
 > **Serialize authority, not intelligence.**
 
+This is not an implementation convenience. A machine acts on one world, and that world advances moment after moment: **time is serial, and parallelism is bandwidth as we cross it.** Sensing, searching and predicting may all happen at once, but committing to an act cannot, because each act changes the world the next one is chosen against. It is also a shape found rather than invented — parallel reflexes below, a single line of deliberation above, which is roughly how animals are arranged, and why a reflex withdraws a hand before the brain is told (§21).
+
 Vision analysis, route search, memory retrieval, consulting a remote model, predicting what the battery will do: any of these may run concurrently, on another core, an accelerator, or another machine. Their results return to the serialized authority, which decides what to accept, what to change, and what to ask for.
 
 A single serial process is a reasonable first implementation, and on RV-9 it is the obvious one. It is not the architecture.
@@ -2100,11 +2102,38 @@ What makes this concurrency safe is the rule that already governs the layers, ap
 - A result may arrive too late to matter, so the authority must be free to discard it, and anything started must be abandonable.
 - A computation that fails, times out or is cancelled produces a result saying so. It does not fault the authority.
 
-**Open:** how concurrent computation is expressed at all — whether `in parallel` branches carry it, whether it is requested and taken up like an attempt, and how a computation says what it needs. None of that is designed. On RV-9 the obvious shape needs no new mechanism: a separate process, with its own memory budget, publishing into a cell the authority watches.
+A provisional spelling reuses the shape R9 already has for a request that yields an observable result (§29):
+
+```text
+let route = compute plan_route(here, dock)      # returns at once
+...
+await route.status == DONE within 2s
+else
+    ...
+end
+```
+
+One concept — a request whose result is ordinary observable state — then covers transitions, computations, and the acquisition below.
+
+**Open:** whether that is the right shape, and how a computation says what it needs. None of that is designed. On RV-9 the obvious shape needs no new mechanism: a separate process, with its own memory budget, publishing into a cell the authority watches.
 
 ### `in parallel` here is concurrent pursuit
 
-PROACTION uses the same two block forms as REACTION (§25.2), with the meaning this layer gives them. A branch is a pursuit: something being sought, with its own steps and its own waiting.
+**Pursuits are declared, and named** (provisional):
+
+```text
+pursue KEEP_WARM
+    ...
+end
+
+pursue WATER_WHEN_DRY
+    ...
+end
+```
+
+Declaring a pursuit is what makes it concurrent; the authority interleaves the ones that exist. Names are not decoration. Contention has to report which pursuit holds a domain, the log needs a subject for what was decided, compile errors need a referent, and — since a restart restores intent rather than position — a restored pursuit needs a name to come back as.
+
+Within a pursuit, the block forms of §25.2 are available with the meaning this layer gives them: a branch is something being sought, with its own steps and its own waiting.
 
 Whether branches interleave within one process or genuinely run at once is a property of the target, not of the language. What is fixed is that their decisions serialize.
 
@@ -2120,6 +2149,19 @@ The likely abstraction is an **authority domain** — navigation, manipulation, 
 - pursuits over independent domains proceed at once.
 
 This is §25.2's rule one level up: concurrency is allowed where it is unambiguous. In REACTION the compiler proves non-interference over inputs. In PROACTION, domains name that same interference coarsely enough to arbitrate pursuits before their plans are known in detail.
+
+A provisional spelling, using words the language already has:
+
+```text
+using NAVIGATION within 5min
+    let a = transition AT(DOCK_1)
+    ...
+else
+    # another pursuit holds it, and this one would not wait longer
+end
+```
+
+Acquisition is all or nothing (`using NAVIGATION, MANIPULATION`), release is the end of the block, `within` bounds the wait, and losing arrives as a result rather than an error.
 
 **Open, and deliberately unsettled:**
 
@@ -2146,6 +2188,20 @@ Each layer has a recurring boundary. REALTIME has its period, REACTION has `awai
 A pursuit may not run arbitrarily far without reaching one, so responsiveness has a bound even though deliberation does not. Redirection then has a clean meaning: something can make a pursuit stale, and the process reconsiders at its next decision point rather than being interrupted mid-thought.
 
 **The authority must not block.** A remote model, a database query, a long retrieval or a transition attempt is issued, and then taken up as an event at a decision point. Serialized and blocking would make the machine hostage to the slowest thing it asked for.
+
+### State That Survives a Restart
+
+**Settled in direction; mechanisms open.**
+
+REALTIME and REACTION need to remember nothing: they re-observe reality, so a power cut costs them only time. PROACTION is the opposite. Which objectives it is pursuing, what it has learned, what it has already asked an operator — none of that is written anywhere in the world.
+
+- **The commit is the unit of durability.** The serialized authority already defines the only moments at which PROACTION's state is coherent: immediately after a decision commits. A durable commit is atomic, so a restart resumes from the last complete one and never from a half-applied one. This is `expose`'s coherent set (§18) one level up.
+- **The log and the checkpoint do different jobs.** The log is bounded and forgets (§34.4), so belief cannot be rebuilt by folding over it. A checkpoint is fixed-size and overwritten. *The log records what was decided; the checkpoint records what is believed.* Neither replaces the other.
+- **Durability is declared, never ambient.** Only state explicitly marked durable is written; otherwise every assignment becomes a flash write and its cost is invisible. Durable state carries a declared maximum size, so RV-9 admits it as it admits everything else.
+- **Persist intent and knowledge; never persist the world.** Storing "the brake was engaged" is the stale label §23 exists to avoid, and reality answers that question on its own. Storing "dock 2 has failed twice" is knowledge no sensor holds.
+- **A restart is a reconsideration, not a resumption.** The world moved while the machine was off. A restored pursuit returns as *intent* — reach the dock — and its plan is recomputed from observed reality. Continuing at step 3 of 7 would be the stale label wearing a different hat.
+
+This covers small state: kilobytes of belief. A map or a large knowledge base is the unsolved data question (§34.4), and a checkpoint is the wrong shape for it.
 
 ### Watchers that inform
 
@@ -2341,6 +2397,7 @@ We do not yet know whether `graph` should be a first-class type, a way of organi
 - how the cost of a query is bounded, and whether the compiler can report a query's plan the way it reports timing evidence;
 - how a working set is sized against a process's memory budget, and what is evicted;
 - which indexing techniques are practical on small targets, and how new ones are added;
+- how belief larger than a checkpoint is kept, since §34.3's checkpoint suits kilobytes and not a map;
 - how recorded history relates to publication. A publication already carries a sequence number and an observation time (§18.1), and these are natural keys for a history of what was observed.
 
 ### What RV-9 offers today
@@ -2572,14 +2629,15 @@ Provisional (§44.1): functions grouped in modules, private until exported, `x.f
 
 ## PROACTION
 
-Only the two block forms, with the meaning §34.3 gives them:
-
 ```text
+pursue
+using
+compute
 in sequence
 in parallel
 ```
 
-Nothing else yet, deliberately (§34).
+All provisional (§34.3), and the first PROACTION vocabulary there has been. `pursue` names a pursuit, `using` acquires an authority domain for a block, and `compute` starts work whose result is ordinary observable state. The block forms carry this layer's meaning.
 
 This is intentionally tiny.
 
@@ -2935,6 +2993,8 @@ Open research and design:
 - the historical log: whether anything is summarised as it is discarded, what a power failure costs, entry identity for later metadata, and how it is searched (§34.4);
 - whether PROACTION gets dynamically sized arrays, and the bounded heap RV-9 would have to grow for them (§34.4);
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
+- durable state: how a commit is made crash-consistent, how often a program may commit against flash wear, and what happens when a record's type changes while a checkpoint holds the old shape (§34.3);
+- whether `pursue`, `using` and `compute` are the right three words, and whether a branch within a pursuit also wants a name (§34.3);
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
 
