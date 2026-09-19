@@ -1,0 +1,397 @@
+# Grow chamber — the REALTIME and REACTION halves
+#
+# A test program for R9 as it stands on 2026-09-19. It was written to find out
+# where the language cannot say what was meant, not to control a real chamber.
+# PROACTION is deliberately absent; the end of this file says what it would
+# have decided.
+#
+# Hardware assumed, all of it reachable from RV-9 today:
+#
+#   heater relay      /gpio        thermistor        /adc0
+#   pump relay        /gpio        moisture probe    /adc0
+#   lamp relay        /gpio        tank float        /adc0
+#   fan               /pwm0
+#
+# Every place marked GAP n is something the language could not express. The
+# list is collected at the bottom of the file.
+
+
+const TARGET_DAY   = 24C
+const TARGET_NIGHT = 18C
+const BAND         = 0.5C      # how close counts as "at temperature"
+const HYSTERESIS   = 0.3C      # the heater's own on/off band
+const CRITICAL     = 38C       # above this the heater stops, whatever it is told
+
+const MOIST_LEVEL  = 45%       # wet enough above this
+const DRY_LEVEL    = 30%       # needs water below this
+const SOAK         = 2min      # how long water takes to reach the probe
+const MAX_RUN      = 20s       # the pump may never run longer than this
+const COOLDOWN     = 30min     # nor start again sooner than this
+const TANK_LOW     = 10%
+
+# GAP 1: pid, abs and the thermistor conversion are calls to a library that
+# cannot be declared. §44.1 settles the shape of functions and modules, not
+# their syntax.
+
+
+# ---------------------------------------------------------------- REALTIME
+
+realtime CLIMATE every 500ms
+    deadline 200ms
+
+    input target  = TARGET_NIGHT
+    input heating = false
+    input fan_min = 0%
+
+    let temperature = thermistor.celsius      # GAP 2
+    let too_hot = temperature > CRITICAL
+
+    keep heater_on = false                    # GAP 3
+
+    if heating == false or too_hot
+        heater_on = false                     # the component's own ceiling:
+    else if temperature < target - HYSTERESIS # REACTION cannot talk it out of
+        heater_on = true                      # this one (§31.2)
+    else if temperature > target + HYSTERESIS # GAP 7
+        heater_on = false
+    end
+
+    heater.closed = heater_on
+
+    let fan = fan_min
+    if too_hot
+        fan = 100%
+    end
+    limit fan to 0% .. 100%
+    fan_drive.duty = fan
+
+    expose temperature, heater_on, fan, target
+end
+
+failsafe CLIMATE
+    heater.closed = false
+    fan_drive.duty = 0%
+end
+
+
+realtime IRRIGATION every 100ms
+    deadline 40ms
+
+    input watering = false
+
+    let moisture = probe.percent              # GAP 2
+
+    keep run_time = 0s                        # GAP 3
+    keep last_run = never                     # GAP 4
+
+    let allowed = watering
+    if run_time >= MAX_RUN
+        allowed = false                       # the pump's own limit, for the
+    end                                       # same reason as the heater's
+    if now - last_run < COOLDOWN and run_time == 0s
+        allowed = false                       # GAP 6
+    end
+
+    pump.closed = allowed
+
+    if allowed
+        run_time = run_time + 100ms           # GAP 5
+    else
+        if run_time > 0s
+            last_run = now
+        end
+        run_time = 0s
+    end
+
+    let pumping = allowed
+    expose moisture, pumping, run_time, last_run
+end
+
+failsafe IRRIGATION
+    pump.closed = false
+end
+
+
+realtime TANK every 1s
+    let level = float.percent                 # GAP 2
+    let empty = level < TANK_LOW
+    expose level, empty
+end
+# no failsafe: TANK owns no actuator, so there is nothing to leave defined
+
+
+realtime LAMP every 1s
+    input on = false
+    lamp.closed = on
+    let lit = on
+    expose lit
+end
+
+failsafe LAMP
+    lamp.closed = false
+end
+
+
+# ---------------------------------------------------------------- REACTION
+
+# Temperature. IN_BAND, TOO_COLD and TOO_HOT cover every reality, so a plan
+# always has somewhere to start (§31.4).
+
+state TOO_COLD
+    CLIMATE.temperature < CLIMATE.target - BAND
+end
+
+state IN_BAND
+    abs(CLIMATE.temperature - CLIMATE.target) < BAND
+end
+
+state TOO_HOT
+    CLIMATE.temperature > CLIMATE.target + BAND
+end
+
+# The same predicate again, parameterized, because a request must name the
+# temperature it wants and IN_BAND cannot be asked for. GAP 9.
+
+state AT_TEMP(target)
+    abs(CLIMATE.temperature - target) < BAND
+end
+
+# Moisture. These two deliberately do NOT cover reality: between 30% and 45%
+# neither holds, which is what stops the predicate flickering as the probe
+# jitters — and leaves the planner with nowhere to start. GAP 10.
+
+state DRY
+    IRRIGATION.moisture < DRY_LEVEL
+end
+
+state MOIST
+    IRRIGATION.moisture >= MOIST_LEVEL
+end
+
+state SAFE
+    CLIMATE.heater_on == false
+    IRRIGATION.pumping == false
+end
+
+state TENDED(target)
+    abs(CLIMATE.temperature - target) < BAND
+    IRRIGATION.moisture >= MOIST_LEVEL
+end
+
+
+transition TOO_COLD -> AT_TEMP(target)
+
+    CLIMATE.target = target
+    CLIMATE.heating = true
+
+    await abs(CLIMATE.temperature - target) < BAND within 30min
+    else
+        fault HEAT_TIMEOUT
+    end
+
+end
+
+
+transition TOO_HOT -> AT_TEMP(target)
+
+    CLIMATE.heating = false
+    CLIMATE.target = target
+    CLIMATE.fan_min = 60%
+
+    await abs(CLIMATE.temperature - target) < BAND within 30min
+    else
+        fault COOL_TIMEOUT
+    end
+
+    CLIMATE.fan_min = 0%
+
+end
+
+
+transition DRY -> MOIST
+
+    require TANK.empty == false
+    require now - IRRIGATION.last_run > COOLDOWN     # GAP 6, GAP 13
+
+    IRRIGATION.watering = true
+
+    await IRRIGATION.moisture >= MOIST_LEVEL within SOAK
+    else
+        fault WATER_TIMEOUT                          # GAP 11
+    end
+
+    IRRIGATION.watering = false
+
+end
+
+
+# Three transitions with one body between them. GAP 8.
+
+transition TOO_COLD -> SAFE
+    CLIMATE.heating = false
+    IRRIGATION.watering = false
+    await CLIMATE.heater_on == false and IRRIGATION.pumping == false within 2s
+    else
+        fault SAFE_TIMEOUT
+    end
+end
+
+transition IN_BAND -> SAFE
+    CLIMATE.heating = false
+    IRRIGATION.watering = false
+    await CLIMATE.heater_on == false and IRRIGATION.pumping == false within 2s
+    else
+        fault SAFE_TIMEOUT
+    end
+end
+
+transition TOO_HOT -> SAFE
+    CLIMATE.heating = false
+    IRRIGATION.watering = false
+    await CLIMATE.heater_on == false and IRRIGATION.pumping == false within 2s
+    else
+        fault SAFE_TIMEOUT
+    end
+end
+
+
+# Warming and watering are independent authorities, so they run at once. The
+# branches write CLIMATE.* and IRRIGATION.* — disjoint, so the compiler
+# accepts the block (§25.2).
+
+transition SAFE -> TENDED(target)
+
+    require TANK.empty == false
+
+    in parallel
+
+        in sequence
+            CLIMATE.target = target
+            CLIMATE.heating = true
+            await abs(CLIMATE.temperature - target) < BAND within 30min
+            else
+                fault HEAT_TIMEOUT
+            end
+        end
+
+        in sequence
+            if IRRIGATION.moisture < DRY_LEVEL
+                IRRIGATION.watering = true
+                await IRRIGATION.moisture >= MOIST_LEVEL within SOAK
+                else
+                    fault WATER_TIMEOUT
+                end
+                IRRIGATION.watering = false
+            end
+        end
+
+    end
+
+end
+
+
+# Reflexes.
+
+watch CLIMATE.temperature within 5s
+
+    if CLIMATE.temperature > CRITICAL
+        CLIMATE.heating = false
+        transition SAFE
+    end
+
+else
+    transition SAFE          # the thermistor has stopped publishing (§21.1)
+end
+
+
+watch TANK.empty
+
+    if TANK.empty
+        IRRIGATION.watering = false
+    end
+
+end
+
+
+watch CLIMATE.faulted, IRRIGATION.faulted          # GAP 12
+
+    if CLIMATE.faulted or IRRIGATION.faulted
+        transition SAFE
+    end
+
+end
+
+
+# ------------------------------------------------- what PROACTION would do
+#
+# Left out on purpose. It would decide:
+#
+#   - whether it is day or night, and so which target to ask for;
+#   - whether to water now or wait for the cooler hours, having read its log
+#     to see whether the last watering actually raised the probe reading;
+#   - whether to run the lamp now or later, against a power budget;
+#   - what to do when the tank is empty, which no transition can fix;
+#   - what to pursue when there is nothing to pursue.
+#
+# None of that can be written yet: PROACTION has an architecture and no
+# grammar (§34).
+
+
+# ------------------------------------------------------ what could not be said
+#
+#  1. Functions and modules. pid, abs and the thermistor conversion are calls
+#     into a library that cannot be declared. Shape settled, syntax missing.
+#
+#  2. Device binding and conversion. thermistor.celsius assumes something
+#     turned ADC counts into a temperature. Where that is written, and how the
+#     unit gets attached, is open (§42).
+#
+#  3. State that survives between activations. A component "may contain
+#     private state" (§11.1) but every declaration in a body is per-activation.
+#     Written here as `keep`, which is invented. A PID integrator needs this
+#     too; the library function has been hiding it.
+#
+#  4. An instant that has not happened yet. `keep last_run = never` needs a
+#     way to say "no time yet". §42 already asks whether R9 wants optional;
+#     this is the first concrete case.
+#
+#  5. The period is written twice. `every 100ms` and `run_time + 100ms` must
+#     agree, and nothing checks that they do. Something like a `dt` bound to
+#     the release interval would remove the duplication.
+#
+#  6. Reading the clock. `now` is used three times and does not exist. RV-9
+#     offers a real-time-safe clock, so this is a spelling, not a mechanism.
+#
+#  7. Offset units. `target - HYSTERESIS` mixes a temperature with a
+#     temperature difference, and `24C - 18C` should be 6K rather than 6C.
+#     R9's dimensional analysis has not addressed offset units at all.
+#
+#  8. A transition from any state. Three identical bodies appear above because
+#     the source must be named. A wildcard source, or a body that can be
+#     shared, would remove the copies — but §23.2 forbids a parameterized
+#     source for good reasons, and this needs the same care.
+#
+#  9. One predicate, written twice. IN_BAND is what the planner matches
+#     against; AT_TEMP(target) is what a request asks for. They say the same
+#     thing in two places, and nothing keeps them in step.
+#
+# 10. A hysteresis gap leaves reality matching no state. Between DRY and MOIST
+#     neither predicate holds, which is exactly what stops flicker (§23.1) and
+#     exactly what leaves a plan with nowhere to start (§31.4). These two
+#     requirements are in direct tension and the design does not resolve it.
+#
+# 11. A faulted transition leaves its inputs where it left them. When
+#     WATER_TIMEOUT fires, IRRIGATION.watering is still true: the component's
+#     failsafe applies only when the component itself dies. What actually
+#     stops the pump is MAX_RUN, inside the component — which is an argument
+#     for putting every input that is unsafe-if-held under a component limit,
+#     and perhaps for saying so in the design.
+#
+# 12. `.faulted` is used by §15.5 and never declared. Is it a field every
+#     component publishes, or something the runtime synthesises?
+#
+# 13. A requirement that depends on the clock. `now - last_run > COOLDOWN` is
+#     true at one moment and false at another, so when the planner evaluates
+#     it matters. §25.1 says requirements are checked again when a transition
+#     is reached, which covers it — but a requirement that becomes true purely
+#     by waiting is a new kind, and may deserve to be named.
