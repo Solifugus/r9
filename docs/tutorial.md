@@ -95,6 +95,41 @@ let position = [10m, 5m, 2m]
 let velocity = (position - previous) / dt
 ```
 
+### Text, instants and angles
+
+**(settled, §4.1, §5.1)**
+
+```text
+let label = "left motor"
+```
+
+Text is UTF-8 bytes with a length, and its **capacity is part of its type**:
+`text[16] + text[8]` is a `text[24]`, so nothing allocates and the compiler
+checks it fits. Escapes are `\n`, `\t`, `\\`, `\"` and `\u{...}`, and an
+unrecognised escape is a compile error rather than a surprise. Offsets are
+byte offsets, and there is no `char` type.
+
+Two distinctions that dimensions alone do not make:
+
+- an **instant** is a point in time, while a duration is a quantity.
+  `instant - instant` gives a duration; `instant + instant` is an error;
+- an **angle** has a dimension of its own, rather than being dimensionless
+  as SI has it. Otherwise torque and energy are indistinguishable, and an
+  angle can be added to a bare number unchallenged.
+
+### Arrays are storage, not matrices
+
+```text
+f32[3,3]             u8[480,640,3]          f32[1024,3]
+```
+
+Arrays have any number of dimensions, and below PROACTION their sizes are
+compile-time constants. They deliberately do **not** define `*`, because
+elementwise and matrix-product are both defensible readings and either one
+silently betrays half its users. `matrix<3,3>`, `vector<3>`, `quaternion`
+and `transform` are library types over array storage, once parametric types
+exist **(§4.2, §44.3)**.
+
 **Try this:** write five declarations whose dimensions the compiler must
 infer, and one that should fail. Decide what error you would want to read.
 
@@ -692,7 +727,7 @@ you have hit.
 | parametric types | wanted by the first libraries (`estimate<T>`, matrices); undesigned (§44.3) |
 | coordinate frames | dimensions are checked, frames are not yet; keep frames in your naming (§44.3) |
 | record and type declarations | use them by name and note what you wanted |
-| text and strings | log lines are text; no string type or literal is defined |
+| matrices, vectors, quaternions | library types awaiting parametric types; use arrays and note what you wanted (§4.2) |
 | device binding | `encoder.speed` is assumed bound to an RV-9 path by the build (§42) |
 | program structure | no files, modules, imports or namespaces yet |
 | PROACTION grammar | write it as prose or pseudo-code beside the program |

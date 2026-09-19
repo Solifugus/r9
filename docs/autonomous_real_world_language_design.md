@@ -211,32 +211,32 @@ The physical meaning and machine representation are deliberately separate concep
 
 The type system should remain compact.
 
-Likely core machine types:
+Core machine types:
 
 ```text
 bool
 
-i8
-i16
-i32
-i64
+i8    i16   i32   i64
+u8    u16   u32   u64
 
-u8
-u16
-u32
-u64
-
-f32
-f64
-f128      // target-dependent
+f32   f64
 
 fixed[a,b]
+
+text[n]        // bounded UTF-8 text (§4.1)
+instant        // a point in time, not a duration (§5.1)
 
 enum
 record
 
-type[n]   // fixed-size arrays
+type[n]        // fixed-size arrays, any number of dimensions (§4.2)
 ```
+
+Vectors, matrices, quaternions, transforms and estimates are **not** core types. They are library types built over these once parametric types exist (§44.3).
+
+**`f128` was removed.** Nothing among the libraries R9 expects (Appendix A) needs it, and `f64` already resolves to about a nanometre over the circumference of the Earth. Long-range navigation error is dominated by sensors, wind and models, and the loop is closed continuously: precision beyond `f64` buys nothing that the next fix does not.
+
+**`fixed[a,b]` stays, for a reason worth recording.** Where a target has no hardware floating point, `f32` is emulated in software, and a 1 kHz control loop is exactly where that cost lands. Whether the first RV-9 targets have an FPU is a question for the RV-9 side (§42); if they all do, this type should be reconsidered.
 
 Large dynamic runtime structures are not required for the REALTIME layer. PROACTION will need them (§34.4); this section describes what REALTIME and REACTION rely on.
 
@@ -256,8 +256,44 @@ Fixed buffers are fine:
 
 ```text
 u8[32]
-char[64]
+text[64]
 ```
+
+There is no `char` type; see §4.1.
+
+## 4.1 Text
+
+**Settled; spelling provisional.**
+
+Text is needed in more places than a control loop suggests: log entries (§34.4), display labels, telemetry, operator messages, and anything exchanged with an outside service.
+
+- **UTF-8 bytes, with a length.** Not NUL-terminated. A length and a byte count let text hold any byte, make length O(1), and match the accounting R9 already does, since a log entry's maximum length is in bytes.
+- **Capacity is part of the type.** `text[64]` is 64 bytes of capacity plus a length, so text needs no allocation and can be used in REALTIME, where nothing may allocate.
+- **Concatenation is statically bounded.** `text[16] + text[8]` has type `text[24]`, and the compiler checks that a result fits where it is put. Truncation happens only where a program asks for it.
+- **Literals are double-quoted**, with `\n`, `\t`, `\\`, `\"` and `\u{...}`. **An unrecognised escape is a compile error**, never a character passed through silently.
+- **Offsets are byte offsets.** Iterating by code point is a library function. There is no `char` type: under UTF-8, a fixed-width character type is a trap.
+
+Storage and display are different problems. A target whose console font covers only ASCII will not render text that stores perfectly well (§42).
+
+## 4.2 Arrays, and What They Are Not
+
+**Settled.**
+
+An array is storage with a shape, in any number of dimensions:
+
+```text
+f32[3,3]             # a 3x3 of floats
+u8[480,640,3]        # an image
+f32[1024,3]          # a point cloud
+```
+
+Below PROACTION every dimension is a compile-time constant. Arrays that grow belong to PROACTION, and wait on the heap question (§34.4).
+
+**An array is not a matrix.** Defining `*` on a two-dimensional array forces a choice between elementwise multiplication and the matrix product, and either answer silently does the wrong thing to half of those who use it. So arrays offer indexing, slicing and elementwise operations, while `matrix<3,3>`, `vector<3>`, `quaternion` and `transform` are **library types** over array storage, once parametric types exist (§44.3). There `*` is the matrix product, because the type says so.
+
+**Tensor algebra is not planned.** Storage of three and four dimensions is needed — images, voxel grids, inference buffers — but contraction and its relatives belong to neural inference, which R9 delegates rather than computes (Appendix A, tier 4).
+
+**Dimensions stay off the array.** A rotation matrix is dimensionless, a Jacobian's entries are m/rad, and a covariance matrix carries squared units: one dimension for a whole array fits none of them. Units live on the vectors and quantities an array is applied to. This is a real limitation rather than a tidy answer, and it is what makes unit-checked linear algebra awkward in every language that has tried it (§42).
 
 ---
 
@@ -356,6 +392,22 @@ let velocity = (position - previous) / dt
 ```
 
 The compiler can infer a three-element vector with the physical dimension `length / time`.
+
+## 5.1 Instants, Durations and Angles
+
+**Settled; spelling provisional.**
+
+Two distinctions that dimensional analysis alone does not make.
+
+**An instant is not a duration.** `5ms` is a duration, a quantity of dimension time. A timestamp is a point in time: a publication carries an observation time (§18.1), a log entry carries `time` (§34.4), and a relative view computes one instant minus another. Adding two instants is meaningless, and until now nothing in R9 said so:
+
+```text
+instant - instant   -> duration
+instant + duration  -> instant
+instant + instant   -> an error
+```
+
+**An angle is not dimensionless.** In SI a radian is m/m, which is why torque (N·m) and energy (J) share dimensions, and why an angle can be added to a bare number unchallenged. Kinematics, quaternions and IMU fusion all live on angles, so R9 treats **angle as a base dimension of its own** rather than inheriting that ambiguity. `rad` is the unit; `deg` is accepted as a literal form and converted at compile time.
 
 ---
 
@@ -2863,6 +2915,14 @@ Open research and design:
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
+
+## Types
+
+- the spellings of `text[n]`, `instant` and the `deg` literal (§4.1, §5.1);
+- whether `fixed[a,b]` is still warranted, once it is known whether the first targets have hardware floating point (§4);
+- dimensions and linear algebra: units live on vectors and quantities rather than on arrays, which fits a rotation matrix and a Jacobian badly. Whether anything better exists is open (§4.2);
+- absence: R9 has no `optional<T>`, and handles absence per mechanism — a sequence number, an input's default, a published fault. Once parametric types exist one will be proposed, and the answer should be decided rather than drifted into (§44.3);
+- text that stores correctly may still not render, where a target's console font covers only ASCII (§4.1).
 
 ## Libraries
 
