@@ -2547,7 +2547,15 @@ in parallel
 
 ## Functions and modules
 
-No keywords are settled. The shape is §44.1: functions grouped in modules, `x.f(y)` meaning `f(x, y)`, and operators for the symmetric cases.
+```text
+module
+use
+function
+export
+returns
+```
+
+Provisional (§44.1): functions grouped in modules, private until exported, `x.f(y)` meaning `f(x, y)`, and operators for the symmetric cases.
 
 ## PROACTION
 
@@ -2926,13 +2934,21 @@ Open research and design:
 
 ## Libraries
 
-- declaration syntax for functions and modules, and how names are imported or qualified (§44.1);
+- the provisional module syntax of §44.1, and whether a library may also export component templates rather than only functions and types;
 - whether a library may define operators for its own types (§44.1);
 - parametric types: how they are written, and confirming they are monomorphised at compile time (§44.3);
 - whether a publication, a log attribute and an estimate are one concept or three (§44.3);
 - coordinate frames as a checked property, and how a frame is declared and converted (§44.3);
 - how a library carries its layer colouring outward to a program that uses it (§44.3);
 - device binding, which decides both hardware naming and simulated substitution (§44.3).
+
+## Federation
+
+- the spelling of an optional component, admitted when its device appears (§45.1);
+- how a peer's presence, and a federation's membership, are discovered and published (§45.2);
+- how clock offsets are established, exchanged and bounded, and whether a drift bound is declared per machine (§45.4);
+- whether RV-9's `watches` needs an optional form, since a watcher of an optional or remote publication must be admittable while its publisher is absent (§45.1);
+- whether proof obligations become per-configuration, and whether the degraded configuration — nothing optional present — is the one that must be proven safe (§45.1).
 
 ## Proofing
 
@@ -3001,6 +3017,40 @@ The next major design question is PROACTION's execution model, and in particular
 - **Operators carry the rest.** `transform * point`, quantity arithmetic, vector algebra. Whether a library may define operators for its own types is open.
 - **No inheritance, and no dynamic dispatch hierarchies.** They would defeat the static analysis the lower layers rest on, and §39's rule against vocabulary growth applies.
 
+### Provisional syntax
+
+```text
+module geometry
+
+    const TAU = 6.283185307179586
+
+    export function distance(a: position, b: position) returns length
+        return magnitude(b - a)
+    end
+
+    function magnitude(v: position) returns length      # private
+        ...
+    end
+
+end
+```
+
+```text
+use geometry                 # geometry.distance(a, b)
+use geometry.distance        # distance(a, b)
+use geometry as geo          # geo.distance(a, b)
+```
+
+- **`function`** joins the family of single lowercase declaration words: `realtime`, `state`, `transition`, `watch`, `failsafe`.
+- **`returns`**, not `->`. The arrow already means a transformation between states (§25), and one symbol should not carry two unrelated meanings. `returns` also ties to the `return` statement, and would extend naturally to several results, where a symbol would need brackets and a tuple type R9 does not have.
+- **`name: type`** reuses the colon of §23.2's state parameters.
+- **Private by default; `export` publishes.** The instinct is a component's, whose values are private until exposed. `expose` and `export` stay separate words: one is a runtime publication with coherence semantics, the other compile-time visibility.
+- **An exported function declares its result type; a private one may leave it inferred** (§6). A library's interface is what colouring and error messages hang off, and should be explicit; a local helper should not need ceremony.
+- **Module names are dotted and hierarchical**, and a file declares one module, which lines up with the bundle.
+- **A module name is a compile-time namespace. A path is a runtime address.** They are deliberately not made to resemble one another.
+
+Five words — `module`, `use`, `function`, `export`, `returns` — and the largest addition to the vocabulary since the reactive layer. §39's rule is why it waited: libraries are the concrete problem that cannot be expressed without them.
+
 ## 44.2 Function Values
 
 **Settled.**
@@ -3030,6 +3080,51 @@ Four things R9 does not have, each forced by libraries that will certainly exist
 **A library acquires no authority its caller lacks** (§31.2). This holds for a learned policy as much as for anything else: *learning a policy is not authorization to execute an action*. A learner proposes; REACTION still decides whether the request is legal; REALTIME still holds its own limits and applies its own failsafes when the policy turns out to be creatively stupid.
 
 **A library may not become a theory of intelligence by the back door.** A behavior or planning library is optional by construction, and nothing below PROACTION may depend on one (§34.1).
+
+---
+
+# 45. Dynamic Hardware and Federation
+
+**Recorded 2026-09-19.** The design has assumed a fixed machine: devices are claimed at admission, implementations are bound when the bundle is built, and `watches` is refused when nothing on the machine could publish the name. Hardware that arrives and leaves while the machine runs, and federations that machines join and leave, break those assumptions — though not, as it turns out, the architecture.
+
+## 45.1 Presence Is Reality
+
+**Settled in principle; spellings open.**
+
+> The set of things that *could* exist is static. The set of things *present* varies, and presence is published reality.
+
+- **Presence is a predicate.** `require ARM.present` makes every transition needing that arm ineligible while it is absent, so the planner routes around it, or fails with `PRECONDITION_FAILED` naming the missing hardware rather than an opaque `NO_PATH` (§25.1). No new mechanism is required.
+- **Removal is already a fault.** RV-9 ties device ownership to process lifetime, faults with `DEVICE`, applies the declared failsafe and publishes the fault into the component's cell (§15). A transition awaiting that component fails `COMPONENT_FAILED`, and a `watch` on `.faulted` responds.
+- **Addition is admission.** RV-9 loads modules at runtime already. What R9 lacks is a way to declare a component **optional**: compiled into the bundle, admitted when its device appears, absent until then. That is the one new language concept here, and it keeps the graph static — every possible component and transition is known at compile time, and only liveness varies.
+
+## 45.2 Authority Does Not Cross Machines
+
+**Settled.**
+
+REALTIME and REACTION stay machine-local. REACTION's authority rests on bounded planning over a static graph, reading local cells — a snapshot that cannot fail. Across a network none of that survives: latency is unbounded, packets are lost, and partitions happen.
+
+Each machine therefore owns its own hardware, and **a remote peer is a PROACTION-level requester**. It may request states and observe publications; it may never write another machine's inputs. §31.2 already forbids that of PROACTION locally, so federation grants no new privilege — it only puts a network in front of the same boundary. What follows is the property worth having:
+
+> A partition cannot make a machine unsafe. It can only make it idle.
+
+**Contention generalises.** Two machines wanting the same dock, doorway or workpiece is two pursuits wanting the same authority domain (§34.3), one level out. The machine that owns the hardware hosts the arbitration: peers ask, one wins, and losing is an ordinary attempt result (§29). No election, no distributed lock.
+
+## 45.3 Two Things Federation Must Not Do
+
+**The path may span machines; the type must not lie.** RV-9 makes a remote publication addressable exactly as a local one, and that transparency is a trap. A local cell read is a copy that cannot fail; a remote one is a round trip that may be stale, partitioned or gone. A remote observation must carry its age and its absence where a program can see them. This is §44.3's *value together with what is known about it*, and federation is what forces it to exist.
+
+**The graph never assembles itself from the network.** Presence may vary; the set of possible states and transitions stays compiled. A graph built from whatever joined the network cannot be analysed, and with the analysis goes the reason REACTION outranks PROACTION at all.
+
+## 45.4 Time Across Machines
+
+**Settled in direction; provisional.**
+
+- **REALTIME and REACTION never depend on federated time.** Deadlines are local and measured by the local clock. Nothing about a network may reach a control loop.
+- **A remote timestamp is converted at the boundary** into local time, using the offset held for that peer, and it carries the **uncertainty** of that conversion: the error in the offset estimate, plus drift since it was last exchanged.
+- **Partition degrades precision, not truth.** With no exchange, uncertainty grows at the drift bound. A remote observation becomes less precise — something a program can reason about — rather than wrong, which is something it cannot.
+- **Ordering within a machine is exact; ordering across machines is only as good as the offsets.** Where two events from different machines cannot be ordered, the log says so rather than inventing an order, which is the honesty §34.4 already requires of curtailment.
+
+A synchronisation service may narrow the offsets. That is a library (Appendix A), not a language feature.
 
 ---
 

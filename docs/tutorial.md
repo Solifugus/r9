@@ -181,7 +181,29 @@ end
 
 ### Functions and modules
 
-**(settled in shape, §44.1; no syntax yet)**
+**(settled in shape; syntax provisional, §44.1)**
+
+```text
+module geometry
+
+    export function distance(a: position, b: position) returns length
+        return magnitude(b - a)
+    end
+
+    function magnitude(v: position) returns length      # private
+        ...
+    end
+
+end
+
+use geometry                 # geometry.distance(a, b)
+use geometry.distance        # distance(a, b)
+```
+
+`returns` rather than `->`, because the arrow already means a transition
+between states. Declarations are private until `export`ed, and an exported
+function must declare its result type while a private one may leave it
+inferred.
 
 Functions are ordinary declarations, grouped in **modules** that serve as
 namespaces. Related things stay together because they are declared
@@ -639,6 +661,12 @@ one, so redirection has a bound. The authority must never block.
 **A PROACTION watcher informs; it does not take control.** Only REACTION
 watchers act directly.
 
+**Several machines are several PROACTIONs.** REALTIME and REACTION stay
+machine-local, because a bounded planner reading local cells cannot survive a
+network. A remote peer is a PROACTION-level requester: it asks for states and
+observes publications, and never writes another machine's inputs. So a
+partition cannot make a machine unsafe — only idle **(§45)**.
+
 **Idleness is a condition to watch.** A machine pursuing nothing is safe
 but not autonomous, so "nothing is being pursued" deserves a declared
 fallback.
@@ -723,7 +751,7 @@ you have hit.
 
 | missing | what to do meanwhile |
 | --- | --- |
-| function and module syntax | the shape is settled (§44.1) but not the spelling; call them as if a library provides them (`pid`, `abs`, `distance`) |
+| function and module syntax | provisional and usable (§44.1); the libraries themselves do not exist, so call `pid`, `abs` and `distance` as if they did |
 | parametric types | wanted by the first libraries (`estimate<T>`, matrices); undesigned (§44.3) |
 | coordinate frames | dimensions are checked, frames are not yet; keep frames in your naming (§44.3) |
 | record and type declarations | use them by name and note what you wanted |
