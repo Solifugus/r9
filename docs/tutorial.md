@@ -1,7 +1,7 @@
 # Rachis9 — A Tutorial
 
 A working tour of R9, the language for autonomous real-world systems, as it
-stands on 2026-09-15. It follows `autonomous_real_world_language_design.md`
+stands on 2026-09-18. It follows `autonomous_real_world_language_design.md`
 and cites its sections, so anything here can be chased back to the reasoning
 behind it.
 
@@ -20,7 +20,7 @@ Everything is marked, because not all of it is equally firm:
 | **(provisional)** | the shape is agreed, the spelling may change |
 | **(open)** | named but undesigned; write around it |
 
-**Chapter 12 lists what is not defined yet.** Read it before writing your
+**Chapter 13 lists what is not defined yet.** Read it before writing your
 first program, so you know which walls are real.
 
 ---
@@ -143,6 +143,34 @@ end
 
 `await` blocks until the condition holds. If `within` expires first, the
 `else` branch runs. **(§10)**
+
+### Functions and modules
+
+**(settled in shape, §44.1; no syntax yet)**
+
+Functions are ordinary declarations, grouped in **modules** that serve as
+namespaces. Related things stay together because they are declared
+together — not because they hang off an object.
+
+R9 is deliberately not method-oriented. It replaced *call the object* with
+*write an input, read a publication* (chapter 5), so `MOTOR.stop()` is not
+how anything works. But a call may be written either way:
+
+```text
+distance(a, b)          # these two mean
+a.distance(b)           # exactly the same thing
+```
+
+so chaining reads well — `v.normalize().scale(2m)` — while symmetric
+operations such as `distance` and `dot` stay symmetric. Operators carry
+the rest: `transform * point`, and all quantity arithmetic.
+
+**Function values exist only in PROACTION (§44.2).** Below it, a choice of
+implementation — this IMU driver or that one, a real motor or a simulated
+one — is made when the bundle is built, so calls stay direct and the
+compiler's guarantees (chapter 12) stay exact.
+
+There is no inheritance and no dynamic dispatch.
 
 **Try this:** rewrite a polling loop you have written in C as an `await`
 with a bound. Notice what you had to decide that C let you leave vague.
@@ -643,6 +671,11 @@ like anything a person wrote **(settled, §37)**.
   publications and failsafes, emitted as a manifest RV-9 admits against
   actual hardware, then measures (§16.1, §2.1).
 
+A library is coloured the same way: geometry is real-time safe, a planner
+is not, and a library carries that outward to whatever calls it (§44.3).
+That is what stops a library call from quietly breaking admission inside a
+control loop.
+
 R9 describes; RV-9 enforces. Where they disagree, RV-9 reports it as
 ordinary observable state.
 
@@ -655,7 +688,9 @@ you have hit.
 
 | missing | what to do meanwhile |
 | --- | --- |
-| function declarations | call them as if a library provides them (`pid`, `abs`, `distance`) |
+| function and module syntax | the shape is settled (§44.1) but not the spelling; call them as if a library provides them (`pid`, `abs`, `distance`) |
+| parametric types | wanted by the first libraries (`estimate<T>`, matrices); undesigned (§44.3) |
+| coordinate frames | dimensions are checked, frames are not yet; keep frames in your naming (§44.3) |
 | record and type declarations | use them by name and note what you wanted |
 | text and strings | log lines are text; no string type or literal is defined |
 | device binding | `encoder.speed` is assumed bound to an RV-9 path by the build (§42) |
@@ -682,6 +717,12 @@ PROACTION   in sequence in parallel   (nothing else yet)
 Deliberately absent: `event`, `heal`, `recover`, `proof`, `invariant`,
 `mutex`, `semaphore`, `thread`, `lock`, `malloc`, `free`, `try`, `catch`,
 `priority`.
+
+Libraries are further off still, and Appendix A of the design document
+lists the ones R9 will eventually want, in the order they would be built.
+Tier 1 — math, geometry, quantities — is what forces the language
+questions above, so it is really a language decision wearing a library's
+clothes.
 
 If something cannot be said with what is there, that is worth writing
 down — but the design's standing rule is to resist new vocabulary until a

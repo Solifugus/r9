@@ -763,7 +763,7 @@ R9 can do this. A program is compiled as a bundle, and the layers where these re
 
 - **Inference rather than declaration** keeps the vocabulary small. Nothing is annotated, and the compiler works it out.
 - **The diagnostic matters as much as the check.** An error must name the call path that reached the offending construct, not merely the function that was called.
-- **Open:** whether some properties should also be declarable, for separate compilation or for a library whose source is absent; and what indirect calls would mean, if R9 ever gains them.
+- **Open:** whether some properties should also be declarable, for separate compilation or for a library whose source is absent. Indirect calls are answered in §44.2: permitted in PROACTION, where the compiler takes a property to hold only where it holds for every possible target, and absent below it.
 
 ---
 
@@ -2493,6 +2493,10 @@ in parallel
 
 `watch` also takes `within ... else` for silence (§21.1, provisional). States may take parameters (§23.2, provisional).
 
+## Functions and modules
+
+No keywords are settled. The shape is §44.1: functions grouped in modules, `x.f(y)` meaning `f(x, y)`, and operators for the symmetric cases.
+
 ## PROACTION
 
 Only the two block forms, with the meaning §34.3 gives them:
@@ -2860,6 +2864,16 @@ Open research and design:
 - long-term memory and context representation;
 - which ideas from Conatus or other architectures are worth adopting (§35).
 
+## Libraries
+
+- declaration syntax for functions and modules, and how names are imported or qualified (§44.1);
+- whether a library may define operators for its own types (§44.1);
+- parametric types: how they are written, and confirming they are monomorphised at compile time (§44.3);
+- whether a publication, a log attribute and an estimate are one concept or three (§44.3);
+- coordinate frames as a checked property, and how a frame is declared and converted (§44.3);
+- how a library carries its layer colouring outward to a program that uses it (§44.3);
+- device binding, which decides both hardware naming and simulated substitution (§44.3).
+
 ## Proofing
 
 Proofing is a later phase (§33). Until then, decisions in every layer should keep strong compile-time analysis possible.
@@ -2909,3 +2923,112 @@ PROACTION decides what should happen next, on its own initiative and on the syst
 The next major design question is PROACTION's execution model, and in particular how to:
 
 > **Make large, persistent, searchable knowledge feel like ordinary data.**
+
+
+---
+
+# 44. Libraries, and What They Require of the Language
+
+**Recorded 2026-09-18.** R9 has no libraries, and will not have them soon. But the shape of the ones it will eventually need already settles several language questions, and it is cheaper to decide them now than to discover them from twenty libraries pulling in different directions.
+
+## 44.1 Functions, Modules and Names
+
+**Settled; syntax open.**
+
+- **Functions are ordinary declarations, grouped in modules.** A module is a namespace. Related things stay together because they are declared together, not because they hang off a receiver.
+- **Methods are not the norm.** R9 deliberately replaced *call the object* with *write an input, read a publication* (§17–§19). A component is reached through its declared inputs and publications and never by invocation. Making methods the usual way to organise code would invite `MOTOR.stop()`, and undo the thing the architecture is built on.
+- **Uniform call syntax.** `x.f(y)` means `f(x, y)` where `f` is in scope. That gives chaining and discovery — `v.normalize().scale(2m)` — without an object model, and without having to decide whether `distance` belongs to the first point or the second. Symmetric operations stay symmetric.
+- **Operators carry the rest.** `transform * point`, quantity arithmetic, vector algebra. Whether a library may define operators for its own types is open.
+- **No inheritance, and no dynamic dispatch hierarchies.** They would defeat the static analysis the lower layers rest on, and §39's rule against vocabulary growth applies.
+
+## 44.2 Function Values
+
+**Settled.**
+
+The pressure for first-class functions is not style. It is interchangeable implementations: three IMU drivers behind one interface, or a simulated motor standing in for a real one.
+
+- **In REALTIME and REACTION, implementations are bound when the bundle is built.** Which driver, and whether a device is real or simulated, is a property of the build, like device binding itself. Calls stay direct, so §14.1's colouring stays exact, and substitution still happens.
+- **In PROACTION, function values are permitted.** It is the open world. Because a program is compiled as a bundle, the compiler can compute the possible targets of an indirect call, and take a property to hold only where it holds for every one of them.
+- **Closures that capture and allocate stay out of REALTIME** (§4).
+
+## 44.3 What the Libraries Demand
+
+Four things R9 does not have, each forced by libraries that will certainly exist.
+
+**Parametric types.** `estimate<T>`, matrices, containers. Monomorphised at compile time and never runtime-polymorphic, so that static analysis and bounded execution survive. This is the largest addition on this list, and it is not designed.
+
+**A value together with what is known about it.** Three places already converge on this shape. A publication carries a value, a sequence number and an observation time (§18.1). A log attribute carries a value and its origin (§34.4). Sensor fusion wants a value, its uncertainty, its time and its provenance. Whether that is one concept or three coincidences should be decided before three libraries each invent their own.
+
+**Coordinate frames, checked like dimensions.** A position in the base frame and one in the camera frame have identical dimensions and must never be added. R9 already checks physical meaning (§5); a frame is the same idea one level up. Kinematics, mapping, localization and vision all depend on getting it right, and the bug it would remove is the kind that produces plausible numbers rather than obvious nonsense.
+
+**Layer colouring, carried outward.** A library function is usable in some layers and not others: geometry is real-time safe and allocation-free, planning and vision are not. §14.1 already derives such properties through the call graph, and a library must carry them to whatever uses it, the way RV-9's target profile marks which of its own calls are real-time safe (§2.1). Without that, the first library call inside a control loop quietly breaks admission.
+
+**One existing open item is promoted.** Device binding is no longer a loose end. It is the mechanism by which a simulated device stands in for a real one, which is what allows autonomy to be tested without launching the machine at a wall.
+
+## 44.4 What a Library May Not Do
+
+**A library acquires no authority its caller lacks** (§31.2). This holds for a learned policy as much as for anything else: *learning a policy is not authorization to execute an action*. A learner proposes; REACTION still decides whether the request is legal; REALTIME still holds its own limits and applies its own failsafes when the policy turns out to be creatively stupid.
+
+**A library may not become a theory of intelligence by the back door.** A behavior or planning library is optional by construction, and nothing below PROACTION may depend on one (§34.1).
+
+---
+
+# Appendix A: Library Roadmap
+
+**A roadmap, not a commitment.** These are the libraries R9 will eventually want, or ones like them. They are recorded so that today's decisions are made with tomorrow's weight in mind — §44 exists because of this list. Nothing here is designed, and the order matters more than the contents.
+
+### Tier 1 — foundations
+
+Almost everything else depends on these, and writing them is what forces §44.3's language questions.
+
+| library | contents |
+| --- | --- |
+| **Math, geometry and quantities** | vectors, matrices, quaternions, transforms, coordinate frames, interpolation, numerical integration, statistics, and R9's unit-aware quantities |
+| **Signals and filtering** | moving averages, low/high/band-pass filters, FFT, convolution, Kalman, extended and unscented Kalman, complementary filters, noise models — the plumbing between noisy reality and usable state |
+| **Probability and Monte Carlo** | distributions, sampling, Bayesian updates, particle filters, simulation, confidence, probabilistic state — foundational, rather than an add-on to navigation |
+
+### Tier 2 — the machine's own senses and motions
+
+| library | contents |
+| --- | --- |
+| **Sensors and fusion** | IMUs, accelerometers, gyros, magnetometers, encoders, GNSS, rangefinders, LiDAR, cameras, microphones, temperature, pressure, current. Fusion yields not a bare value but an estimate: value, uncertainty, time, provenance |
+| **Control** | PID, feed-forward, state-space, trajectory following, motor control, stabilization, constraints, saturation, later model-predictive control. Binds tightly to REALTIME |
+| **Kinematics and dynamics** | forward and inverse kinematics, rigid-body transforms, joint models, differential drive, Ackermann, mecanum and omnidirectional bases, manipulators, humanoid chains, centre of mass, forces and torques |
+
+### Tier 3 — knowing where it is, and what is around it
+
+| library | contents |
+| --- | --- |
+| **Localization and navigation** | odometry, dead reckoning, particle localization, waypoints, A*, Dijkstra, D*, RRT and RRT*, trajectory generation, obstacle avoidance, probabilistic navigation |
+| **Mapping and spatial representation** | occupancy grids, cost maps, point clouds, voxel maps, landmarks, coordinate frames, map merging, eventually SLAM — constrained on small targets, richer on large ones |
+| **Motion and manipulation planning** | collision checking, configuration spaces, reachability, grasp planning, trajectory optimization, whole-body movement. Expressed as *put the gripper there*, not *set joint 3 to 27 degrees* |
+
+### Tier 4 — perception
+
+| library | contents |
+| --- | --- |
+| **Computer vision** | image buffers, camera calibration, resizing, filtering, edges, contours, optical flow, feature detection and matching, object tracking, depth and stereo, hooks for neural inference |
+| **Machine perception** | object detection and identity, pose estimation, gesture recognition, face detection and recognition, semantic classification, scene understanding, multimodal perception. Kept above vision, so that *faces* are never baked into the foundations |
+| **Audio and speech** | microphone arrays, filtering, direction of arrival, sound classification, wake words, interfaces to recognition and synthesis. Heavy models run elsewhere; RV-9 keeps the real-time audio path |
+
+### Tier 5 — deciding
+
+| library | contents |
+| --- | --- |
+| **Behavior and planning** | goals, plans, actions, preconditions and postconditions, alternatives, search, utility and cost, hierarchical planning — cooperating with PROACTION rather than replacing it, and optional by construction (§44.4) |
+| **Learning** | reinforcement learning, online adaptation, learned models, policy execution, lightweight training. Learning a policy is not authorization to execute an action |
+
+### Cross-cutting — wanted at every tier
+
+| library | contents |
+| --- | --- |
+| **Fault detection and self-healing** | health observations, anomaly detection, watchdog strategies, degraded modes, redundancy, recovery policies, retry and backoff, substitution, diagnosis. R9's `watch` and `transition` should make this unusually direct |
+| **Resource and energy** | CPU budget, memory, battery state, power draw, thermal state, computational cost — so a machine can ask whether an action is *affordable*, not merely possible |
+| **Communications and distributed robotics** | CAN, UART, SPI, I²C, networking, telemetry, serialization, discovery, robot-to-robot coordination. Fleets and swarms belong here, never in the RV-9 kernel |
+| **Simulation and digital twins** | the same component driving a simulated motor as drives a real one, and sensors interchangeable between physical and simulated sources (§44.3, device binding) |
+| **Logging, recording and replay** | record sensor inputs, decisions, transitions and outputs, then replay the world deterministically. PROACTION's log, its recorded commit order (§34.3) and its relative-time views are most of the mechanism already |
+| **Visualization and instrumentation** | live plots, maps, trajectories, sensor views, state and transition diagrams, object inspection, resource meters, logs and controls, drawn through RV-9's `/w0` and interactive where it can be |
+
+### Sequence
+
+Tier 1 first, and not only because the rest depend on it: writing it is what settles parametric types, operators and coordinate frames. In that sense the first library is a language decision wearing a library's clothes.
