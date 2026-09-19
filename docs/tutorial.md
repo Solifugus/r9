@@ -413,6 +413,13 @@ watch MOTOR.temperature, BATTERY.voltage
 end
 ```
 
+**When the body runs (settled, §21):** on every publication of a watched
+reference, whether or not the value differs; on the first value it sees,
+including one published before the watch existed; and on a fault, because a
+fault is a publication into the component's own cell. It does **not** run on
+silence — that needs the timeout form below — nor on a reference nothing has
+ever published.
+
 A watch body is a **reflex**: short, bounded, and never a place to
 orchestrate work. It may not use `in parallel`, directly or through
 anything it calls **(§21, §14.1)**.

@@ -1091,7 +1091,7 @@ The design does not currently introduce an `unknown` data type.
 
 The first publication establishes the baseline.
 
-Subsequent changed publications may trigger reactive watchers.
+**A watcher fires on the first value it sees**, including one published before the watch existed (§21). A supervisor that started late must see what is true now; one that stayed blind until something moved would be blind exactly when reality was steady and wrong.
 
 ### RV-9 publication contract
 
@@ -1253,12 +1253,25 @@ The explicit-reference form gives the compiler/runtime a dependency graph.
 
 This enables efficient behavior:
 
-- reevaluate only when relevant values change;
-- avoid continuous polling;
-- coalesce related changes;
-- short-circuit work when dependencies did not change.
+- reevaluate only when a watched value is published, rather than continuously;
+- avoid polling;
+- coalesce publications that arrive together into one pass;
+- leave untouched anything that depends on nothing that was published.
 
 This matches the design principle of doing more with less.
+
+### When a body runs
+
+**Settled.** A watch body runs:
+
+- **on each publication** of any watched reference, whether or not the value differs from the last. A publication is the event; change is not. Deciding otherwise would mean defining *changed* for a measured quantity, which is §23.1's tolerance problem again, and would suppress almost nothing in practice, because a noisy sensor differs in nearly every publication;
+- **on the first value it sees**, as above;
+- **on a fault**, because a fault *is* a publication: it advances the sequence in the component's own cell, which is what makes `watch MOTOR_CONTROL.faulted` work (§15.6). The body then sees the fault beside the last value the component managed to publish, which is stale by definition.
+
+A watch body does **not** run:
+
+- **on silence.** Nothing arriving changes nothing, which is why noticing silence needs the timeout form (§21.1). A remote publisher that goes away is this case (§45.3);
+- **on a reference that has never been published.** There is no sequence to advance, and nothing to see.
 
 **A watch body is a reflex.** It observes and responds. It is not where work is orchestrated, and it may not use `in parallel`, either directly or through anything it calls (§14.1, §25.2). Where a response genuinely needs concurrency, that belongs in the transition the watch requests, where safe preemption points and failure are already defined (§31.4).
 
@@ -2889,6 +2902,7 @@ Provisional syntax and semantics that still need refinement:
 - parameterized states: declared or inferred parameter types, and whether parameterized states may be transition sources or intermediate steps (§23.2);
 - `require`: where it may appear, and whether a requirement found false during execution fails the attempt or replans (§25.1);
 - the exact semantics of `watch ... within ... else` (§21.1);
+- whether a watch should ever be able to suppress a wakeup for a value that has not changed, given that *changed* is undefined for a measured quantity (§21, §23.1);
 - arbitration among REACTION requests, and whether supersession at equal authority needs its own reason (§31.3);
 - safe preemption points beyond transition boundaries and `await`, and whether consecutive input writes publish as one set (§31.4);
 - the representation of attempt diagnostics (§29);
