@@ -50,6 +50,17 @@ version is:
 > REACTION knows only what reality shows. PROACTION knows what it has been
 > through. **(§31.1)**
 
+Another way to see the split is by how long anything is remembered:
+
+| horizon | what remembers it |
+| --- | --- |
+| reflex, no memory | REACTION re-observes reality and remembers nothing |
+| working, medium term | PROACTION's in-memory state, lost on a power cut |
+| persistent, broad | PROACTION's checkpoint and log |
+
+The layers exist because those horizons need different guarantees — not
+because three layers seemed tidy.
+
 A program compiles to a *bundle*: each REALTIME component becomes an
 independently admitted RV-9 program, with a manifest saying what it needs.
 RV-9 refuses anything it cannot promise. **(§2.1, §16.1)**
