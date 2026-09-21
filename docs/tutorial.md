@@ -123,7 +123,12 @@ byte offsets, and there is no `char` type.
 Two distinctions that dimensions alone do not make:
 
 - an **instant** is a point in time, while a duration is a quantity.
-  `instant - instant` gives a duration; `instant + instant` is an error;
+  `instant - instant` gives a duration; `instant + instant` is an error.
+  It is the monotonic clock: always there, never jumping, and the only clock
+  a deadline may use. Civil time — dates, times of day — is a separate thing
+  that a small machine may not have at all, belongs to PROACTION, and is
+  optional (§5.1, §34.7). `await` also takes an instant, which is how a
+  program waits for a while without a new keyword;
 - an **angle** has a dimension of its own, rather than being dimensionless
   as SI has it. Otherwise torque and energy are indistinguishable, and an
   angle can be added to a bare number unchallenged.

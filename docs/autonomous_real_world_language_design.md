@@ -89,6 +89,8 @@ The system has three layers:
 
 These statements are conceptual, not syntax. REALTIME is relatively mature. REACTION is becoming well defined. PROACTION is under active design (§34).
 
+**Settled:** the layers are optional *upward*. A machine with only REALTIME and REACTION is a complete R9 program — `examples/grow_chamber.r9` is one — and PROACTION adds initiative rather than correctness.
+
 **Settled:** authority runs downward, from REALTIME constraints and safety to REACTION to PROACTION (§31). PROACTION is part of the system itself, not merely an interface to an outside intelligence, though it may use outside services (§34).
 
 ## 2.1 Relationship with RV-9
@@ -406,6 +408,24 @@ instant - instant   -> duration
 instant + duration  -> instant
 instant + instant   -> an error
 ```
+
+**Civil time is a third thing, and it is optional.** A date and a time of day are acquired from outside — a time server, an operator — and a small machine may never have them. On the current target RV-9's clock starts at zero when the board boots, and there is no battery-backed clock.
+
+- **`instant` is the monotonic clock**: always available, never jumping. Deadlines, timeouts, publication stamps and log entries use only this. Nothing about a network, an operator or a calendar may reach a control loop.
+- **Civil time belongs to PROACTION**, as an optional capability of the target (§34.7). A machine with room for a calendar has one; a 200 KB controller keeping a chamber warm does not need one, unless the machine *is* a clock.
+- **Whether the machine knows the date is published reality.** `require CLOCK.set` makes a transition or a pursuit ineligible while the clock has never been set, and names that requirement when it fails (§25.1). No unknown value need be invented.
+- **Prefer sensing to the calendar.** A light sensor knows whether it is daytime better than a clock does, and it keeps working when the network is gone. This is §23's principle again: where the world can be observed, do not compute it from a number that may be absent or wrong.
+
+**Waiting needs no new word.** `await` takes an instant as well as a condition:
+
+```text
+await now + 10min
+await CLOCK.next(06:00)        # only where civil time exists
+```
+
+For a pursuit that is a decision point rather than a block (§34.3).
+
+**Schedules are a library** (Appendix A), and they need two things from the language: durable state for the last occurrence fired (§34.3), and an explicit policy for a clock that jumps. Cron gets this wrong in both directions, either firing a pile of missed events or silently skipping them; with the last occurrence in durable state, a program can say which it wants.
 
 **An angle is not dimensionless.** In SI a radian is m/m, which is why torque (N·m) and energy (J) share dimensions, and why an angle can be added to a bare number unchallenged. Kinematics, quaternions and IMU fusion all live on angles, so R9 treats **angle as a base dimension of its own** rather than inheriting that ambiguity. `rad` is the unit; `deg` is accepted as a literal form and converted at compile time.
 
@@ -2450,6 +2470,34 @@ When any part of PROACTION, or anything it talks to, is off the board, the link 
 - SSH is authenticated, but RV-9 supports one session at a time, and a session costs about 7 KB.
 - A lighter authenticated transport may fit better. Nothing has been selected.
 
+## 34.7 Optional Capabilities
+
+**Settled in principle; spellings open.**
+
+R9 spans targets from a 200 KB controller to machines with real storage and real processors. Rather than a language that assumes the largest, or one that never exceeds the smallest, capabilities are **optional, and they belong to PROACTION**:
+
+> **REALTIME and REACTION may depend on no optional capability.** A machine's timing, reflexes and safety must hold on the smallest target with nothing attached.
+
+That is what makes degradation true everywhere else in this document. A partition, a missing service, an absent card or a small board removes *possibilities*, never *guarantees*.
+
+Capabilities that are already visibly optional:
+
+- civil time and the calendar (§5.1);
+- storage beyond the checkpoint — a card, or a filesystem large enough for a map (§34.4);
+- a network, and with it federation (§45) and every outside service (§34.5);
+- dynamic allocation itself, which RV-9 modules do not have and PROACTION will need;
+- heavy libraries: vision, planning, speech (Appendix A).
+
+R9 already has machinery for all three questions such a capability raises:
+
+1. **Does the target offer it?** RV-9 publishes a machine-readable target profile, and the compiler reads it (§2.1).
+2. **Will this machine promise it?** A program declares what it needs, and admission refuses what cannot be satisfied (§16.1).
+3. **Is it true now?** `require CLOCK.set`, and the same for any other presence — ordinary eligibility over published reality (§25.1, §45.1).
+
+A program may also adapt rather than require: use the calendar where it exists, and a light sensor where it does not.
+
+**Open:** how a program declares a capability requirement, and whether capabilities live in the registry RV-9 already keeps for manifest tags.
+
 ---
 
 # 35. Conatus: An Example, Not the Target
@@ -2993,6 +3041,9 @@ Open research and design:
 - the historical log: whether anything is summarised as it is discarded, what a power failure costs, entry identity for later metadata, and how it is searched (§34.4);
 - whether PROACTION gets dynamically sized arrays, and the bounded heap RV-9 would have to grow for them (§34.4);
 - what bounds the interval before a decision point is reached, and the form of the idle fallback (§34.3);
+- how a program declares an optional capability, and whether capabilities share RV-9's manifest-tag registry (§34.7);
+- what a schedule does when the clock jumps, and where the last-fired occurrence lives (§5.1, §34.3);
+- whether RV-9 exposes civil time at all or publishes it as a service into a cell, who may set it, and whether the monotonic clock survives sleep (§5.1);
 - durable state: how a commit is made crash-consistent, how often a program may commit against flash wear, and what happens when a record's type changes while a checkpoint holds the old shape (§34.3);
 - whether `pursue`, `using` and `compute` are the right three words, and whether a branch within a pursuit also wants a name (§34.3);
 - long-term memory and context representation;
@@ -3256,6 +3307,7 @@ Almost everything else depends on these, and writing them is what forces §44.3'
 | **Communications and distributed robotics** | CAN, UART, SPI, I²C, networking, telemetry, serialization, discovery, robot-to-robot coordination. Fleets and swarms belong here, never in the RV-9 kernel |
 | **Simulation and digital twins** | the same component driving a simulated motor as drives a real one, and sensors interchangeable between physical and simulated sources (§44.3, device binding) |
 | **Logging, recording and replay** | record sensor inputs, decisions, transitions and outputs, then replay the world deterministically. PROACTION's log, its recorded commit order (§34.3) and its relative-time views are most of the mechanism already |
+| **Time and calendar** | civil time where the target has it, schedules with a stated policy for a clock that jumps, sunrise and sunset computed from latitude, longitude and date rather than tabulated, and formatting. No timezone database: it is hundreds of kilobytes and changes by political decree |
 | **Visualization and instrumentation** | live plots, maps, trajectories, sensor views, state and transition diagrams, object inspection, resource meters, logs and controls, drawn through RV-9's `/w0` and interactive where it can be |
 
 ### Sequence
