@@ -409,6 +409,8 @@ instant + duration  -> instant
 instant + instant   -> an error
 ```
 
+The general rule is §5.2's: a point and a difference are different kinds, whatever the scale.
+
 **Civil time is a third thing, and it is optional.** A date and a time of day are acquired from outside — a time server, an operator — and a small machine may never have them. On the current target RV-9's clock starts at zero when the board boots, and there is no battery-backed clock.
 
 - **`instant` is the monotonic clock**: always available, never jumping. Deadlines, timeouts, publication stamps and log entries use only this. Nothing about a network, an operator or a calendar may reach a control loop.
@@ -428,6 +430,30 @@ For a pursuit that is a decision point rather than a block (§34.3).
 **Schedules are a library** (Appendix A), and they need two things from the language: durable state for the last occurrence fired (§34.3), and an explicit policy for a clock that jumps. Cron gets this wrong in both directions, either firing a pile of missed events or silently skipping them; with the last occurrence in durable state, a program can say which it wants.
 
 **An angle is not dimensionless.** In SI a radian is m/m, which is why torque (N·m) and energy (J) share dimensions, and why an angle can be added to a bare number unchallenged. Kinematics, quaternions and IMU fusion all live on angles, so R9 treats **angle as a base dimension of its own** rather than inheriting that ambiguity. `rad` is the unit; `deg` is accepted as a literal form and converted at compile time.
+
+## 5.2 Points and Differences
+
+**Settled; temperature spellings provisional.**
+
+§5.1 separates an instant from a duration. That distinction is not really about time: it is about any scale on which *where you are* and *how far you moved* are different kinds of thing. Temperature is the other one R9 needs now.
+
+```text
+24C - 18C     ->  6K        a difference
+24C + 6K      ->  30C       a point
+24C + 18C     ->  an error
+```
+
+- A **point** is a position on a scale: `24C`, `71F`, `300K`, an instant.
+- A **difference** is an interval on one: `6K`, `2min`.
+- point − point gives a difference; point ± difference gives a point; point + point is an error; differences add, subtract and scale as ordinary quantities (§5).
+
+**Temperature differences are written in kelvin.** `0.5C` is a point and cannot be a band; a band is `0.5K`. This is what `examples/grow_chamber.r9` had wrong — `BAND = 0.5C`, and `target - HYSTERESIS` mixing the two kinds — which is how the problem was found.
+
+**A conversion must know which kind it holds.** A point converts with the offset: 0C is 273.15K and 32F. A difference converts by scale alone: 1K is 1.8 ΔF, never 33.8. Applying an offset to a difference is the classic bug this distinction exists to prevent, and it is silent in every language that treats both as plain numbers.
+
+**Where a bare kelvin literal could be either kind**, inference decides from context; where context does not decide, the compiler asks rather than guessing (§6).
+
+**Open:** whether the same treatment extends to position versus displacement, and to absolute versus gauge pressure. Position is the interesting case, because a point needs a frame of reference — which §44.3 wants for other reasons — so the affine question and the coordinate-frame question are probably one question.
 
 ---
 
@@ -1074,6 +1100,32 @@ MOTOR_CONTROL.output
 ```
 
 This avoids a global-variable model and gives the compiler explicit dependency information.
+
+## 17.1 State That Survives an Activation
+
+**Settled; spelling provisional.**
+
+A component body runs once per release, so every `let` in it is per-activation. A controller needs memory between activations, though: an integrator, a run-timer, an edge, a filter's history, the last value seen. §11.1 said a component "may contain private state" and gave no way to write it; `examples/grow_chamber.r9` could not be written without inventing one.
+
+```text
+realtime IRRIGATION every 100ms
+    input watering = false
+
+    keep run_time = 0s        # initialised once, retained between releases
+    keep last_run = never
+
+    ...
+end
+```
+
+- **Initialised once, before the timing contract begins.** The initialiser runs in the component's initialisation phase, which RV-9 already separates from admitted execution (§16.1). Nothing is initialised on a release.
+- **Retained across activations; lost when the process ends.** A `keep` is not durable. A restarted component starts fresh, which is the only honest behaviour after a fault: the failsafe has been applied, and whatever the integrator believed is no longer about this world. State that survives a restart is PROACTION's, and has its own word (§34.3).
+- **Private**, like any other value in a component, and visible outside only through `expose` (§17, §18).
+- **Fixed size, known at compile time**, so the compiler totals it and emits it as the module's static requirement for RV-9 to admit against the machine (§16.1). This gives RV-9's `static` manifest tag its first consumer.
+- **REALTIME only.** A transition body may not keep state: its progress is discardable by design, and a preemption would leave a half-updated memory behind (§31.4). A watch body may not either — a reflex that remembers is a stored label, which is what §23 exists to avoid. Memory above REALTIME belongs to PROACTION.
+- **Library functions have no hidden state.** A stateful filter takes its state as an argument — `pid(gains, memory, error)` — so it is visible at the call site, sized in the component that owns it, and bounded like everything else. The bare `pid(error)` of earlier examples had been hiding exactly this.
+
+**Open:** the word. `keep` reads as English and cannot be confused with `durable` (§34.3); `static` would tie to RV-9's manifest tag and to systems habit.
 
 ---
 
@@ -2641,6 +2693,7 @@ minimum_interval
 deadline
 placement
 input
+keep
 expose
 limit
 failsafe
@@ -2733,7 +2786,7 @@ A shuttle cart runs on a straight track, driven by a motor and held by a brake.
 # Names this example takes from outside itself:
 #   devices    encoder, motor, brake, cell_monitor
 #              (bound to RV-9 paths by the build; the binding syntax is open, §42)
-#   functions  pid, abs (standard library)
+#   functions  pid, pid_state, abs (standard library)
 
 const STILL       = 0.01m/s     # a measured speed below this is "not moving" (§23.1)
 const ARRIVED     = 5mm         # how close counts as "at" a position
@@ -2752,7 +2805,8 @@ realtime DRIVE every 1ms
     let position = encoder.position
     let speed = encoder.speed
 
-    let output = pid(goal - position)
+    keep hold = pid_state(0.6, 0.1, 0.0)   # a filter's memory lives in its
+    let output = pid(hold, goal - position) # caller, never hidden (§17.1)
     if enabled == false
         output = 0%
     end
@@ -3053,6 +3107,8 @@ Open research and design:
 
 - the spellings of `text[n]`, `instant` and the `deg` literal (§4.1, §5.1);
 - whether `fixed[a,b]` is still warranted, once it is known whether the first targets have hardware floating point (§4);
+- whether points and differences (§5.2) should extend to position versus displacement and to absolute versus gauge pressure, which is probably the same question as coordinate frames (§44.3);
+- the word for component state between activations — `keep` or `static` (§17.1);
 - dimensions and linear algebra: units live on vectors and quantities rather than on arrays, which fits a rotation matrix and a Jacobian badly. Whether anything better exists is open (§4.2);
 - absence: R9 has no `optional<T>`, and handles absence per mechanism — a sequence number, an input's default, a published fault. Once parametric types exist one will be proposed, and the answer should be decided rather than drifted into (§44.3);
 - text that stores correctly may still not render, where a target's console font covers only ASCII (§4.1).
@@ -3095,6 +3151,7 @@ minimum_interval
 deadline
 placement
 input
+keep
 expose
 limit
 failsafe

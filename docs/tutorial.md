@@ -133,6 +133,12 @@ Two distinctions that dimensions alone do not make:
   as SI has it. Otherwise torque and energy are indistinguishable, and an
   angle can be added to a bare number unchallenged.
 
+**Points and differences** (§5.2) generalise the first of those to any scale.
+`24C` is a point, `6K` is a difference, and `24C - 18C` is `6K`. A point plus
+a difference is a point; a point plus a point is an error; and a conversion
+must know which it holds, since a point carries an offset and a difference
+does not.
+
 ### Arrays are storage, not matrices
 
 ```text
@@ -262,7 +268,8 @@ realtime MOTOR every 1ms
 
     let speed = encoder.speed
     let error = target_speed - speed
-    let output = pid(error)
+    keep hold = pid_state(0.6, 0.1, 0.0)  # retained between releases (§17.1)
+    let output = pid(hold, error)
 
     limit output to -75% .. 75%
 
@@ -297,6 +304,12 @@ Line by line:
 
 - **`input`** is the only way anything outside can affect the component
   **(§19)**. Private state is private.
+
+- **`keep`** holds state between releases **(§17.1)**: initialised once before
+  the timing contract begins, retained across activations, gone when the
+  process ends. It is REALTIME's only memory, and library functions may not
+  hide any of their own — a filter takes its state as an argument, which is
+  why `pid` above is handed `hold`.
 
 - **`limit`** clamps a value to a range, and applies to whatever REACTION
   asks for. A layer above cannot talk the component out of its own limits.
@@ -794,6 +807,7 @@ you have hit.
 | missing | what to do meanwhile |
 | --- | --- |
 | function and module syntax | provisional and usable (§44.1); the libraries themselves do not exist, so call `pid`, `abs` and `distance` as if they did |
+| a calendar | no civil time, no time of day, no schedules; `await now + 10min` works, "every day at 06:00" does not (§5.1) |
 | parametric types | wanted by the first libraries (`estimate<T>`, matrices); undesigned (§44.3) |
 | coordinate frames | dimensions are checked, frames are not yet; keep frames in your naming (§44.3) |
 | record and type declarations | use them by name and note what you wanted |

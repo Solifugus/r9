@@ -18,8 +18,8 @@
 
 const TARGET_DAY   = 24C
 const TARGET_NIGHT = 18C
-const BAND         = 0.5C      # how close counts as "at temperature"
-const HYSTERESIS   = 0.3C      # the heater's own on/off band
+const BAND         = 0.5K      # how close counts as "at temperature" (a difference, §5.2)
+const HYSTERESIS   = 0.3K      # the heater's own on/off band (a difference)
 const CRITICAL     = 38C       # above this the heater stops, whatever it is told
 
 const MOIST_LEVEL  = 45%       # wet enough above this
@@ -46,13 +46,13 @@ realtime CLIMATE every 500ms
     let temperature = thermistor.celsius      # GAP 2
     let too_hot = temperature > CRITICAL
 
-    keep heater_on = false                    # GAP 3
+    keep heater_on = false                    # §17.1
 
     if heating == false or too_hot
         heater_on = false                     # the component's own ceiling:
     else if temperature < target - HYSTERESIS # REACTION cannot talk it out of
         heater_on = true                      # this one (§31.2)
-    else if temperature > target + HYSTERESIS # GAP 7
+    else if temperature > target + HYSTERESIS
         heater_on = false
     end
 
@@ -81,7 +81,7 @@ realtime IRRIGATION every 100ms
 
     let moisture = probe.percent              # GAP 2
 
-    keep run_time = 0s                        # GAP 3
+    keep run_time = 0s                        # §17.1
     keep last_run = never                     # GAP 4
 
     let allowed = watering
@@ -346,10 +346,11 @@ end
 #     turned ADC counts into a temperature. Where that is written, and how the
 #     unit gets attached, is open (§42).
 #
-#  3. State that survives between activations. A component "may contain
-#     private state" (§11.1) but every declaration in a body is per-activation.
-#     Written here as `keep`, which is invented. A PID integrator needs this
-#     too; the library function has been hiding it.
+#  3. FIXED (§17.1). State between activations is `keep`: initialised once in
+#     the initialisation phase, retained across releases, lost when the process
+#     ends, sized at compile time and admitted as the module's statics.
+#     REALTIME only, and library functions may not hide state — a filter takes
+#     its state as an argument, which is what bare `pid(error)` was concealing.
 #
 #  4. An instant that has not happened yet. `keep last_run = never` needs a
 #     way to say "no time yet". §42 already asks whether R9 wants optional;
@@ -362,9 +363,11 @@ end
 #  6. Reading the clock. `now` is used three times and does not exist. RV-9
 #     offers a real-time-safe clock, so this is a spelling, not a mechanism.
 #
-#  7. Offset units. `target - HYSTERESIS` mixes a temperature with a
-#     temperature difference, and `24C - 18C` should be 6K rather than 6C.
-#     R9's dimensional analysis has not addressed offset units at all.
+#  7. FIXED (§5.2). Points and differences are different kinds on any scale,
+#     as instants and durations already were: point − point is a difference,
+#     point ± difference is a point, point + point is an error, and a
+#     temperature difference is written in kelvin. The constants above are
+#     `0.5K` and `0.3K` now.
 #
 #  8. A transition from any state. Three identical bodies appear above because
 #     the source must be named. A wildcard source, or a body that can be

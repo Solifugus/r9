@@ -45,7 +45,7 @@ pursue KEEP_CLIMATE
         else
         end
         if f.status == DONE and f.value.warm_afternoon
-            target = target - 1C                         # GAP 4
+            target = target - 1K                         # a difference (§5.2)
         end
 
         using CLIMATE within 1min
@@ -65,9 +65,7 @@ pursue KEEP_CLIMATE
             log("CLIMATE is held by something else")
         end
 
-        await false within 10min                         # GAP 5
-        else
-        end
+        await now + 10min                                # §5.1
     end
 
 end
@@ -79,9 +77,7 @@ pursue WATER_WHEN_DRY
         await IRRIGATION.moisture < DRY_LEVEL
 
         if help_asked
-            await false within 1h                        # GAP 5
-            else
-            end
+            await now + 1h                               # §5.1
         else
             using IRRIGATION within 30min
 
@@ -153,9 +149,7 @@ pursue LIGHT_BUDGET
             end
         end
 
-        await false within 15min                         # GAP 5
-        else
-        end
+        await now + 15min                                # §5.1
     end
 
 end
@@ -221,13 +215,12 @@ end
 #     is the single biggest hole this program found. RV-9 has no clock at boot
 #     either, so it is a co-design question, not only a language one.
 #
-#  4. `target - 1C` is the offset-unit problem from the other file, again: a
-#     temperature minus a temperature difference.
+#  4. FIXED (§5.2). `target - 1K` — a point minus a difference. The offset-unit
+#     problem from the other file is settled.
 #
-#  5. There is no way to simply wait. `await false within 10min else end` is a
-#     deliberate absurdity standing in for it. A pursuit that should act every
-#     ten minutes, or at six in the morning, has no way to say so. This wants
-#     solving with (3).
+#  5. PARTLY FIXED (§5.1). `await` now takes an instant, so the pursuits above
+#     say `await now + 10min` where they once said `await false within 10min
+#     else end`. Acting at six in the morning still needs (3).
 #
 #  6. `now` is still missing, and needed more here than in the other half.
 #
